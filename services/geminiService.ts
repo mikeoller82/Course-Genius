@@ -28,7 +28,8 @@ const outlineSchema = {
     required: ["title", "description", "learningObjectives", "moduleTitles"],
 };
 
-const moduleSchema = {
+// Base module schema without imagePrompt
+const baseModuleSchema = {
     type: Type.OBJECT,
     properties: {
         title: { type: Type.STRING, description: "The title of this course module." },
@@ -44,10 +45,6 @@ const moduleSchema = {
                         type: Type.STRING,
                         description: "A detailed video script for this lesson, including scene descriptions (e.g., '[SCENE: Whiteboard with diagrams]') and narration. The script should directly correspond to the lesson content, transforming it into a visual and spoken format."
                     },
-                    imagePrompt: {
-                        type: Type.STRING,
-                        description: "A concise, descriptive prompt for a single visual aid (like a diagram or illustration) that would enhance the lesson. The prompt should be suitable for an AI image generation model. If no image is necessary, this field should be omitted."
-                    }
                 },
                 required: ["title", "content", "videoScript"],
             }
@@ -56,105 +53,112 @@ const moduleSchema = {
     required: ["title", "description", "lessons"],
 };
 
-async function callApi<T>(prompt: string, schema: object): Promise<T> {
+// Function to dynamically create the module schema
+const getModuleSchema = (includeImages: boolean) => {
+    if (!includeImages) {
+        return baseModuleSchema;
+    }
+
+    // Create a deep copy to avoid mutating the base schema
+    const schema = JSON.parse(JSON.stringify(baseModuleSchema));
+    
+    // Add imagePrompt to lesson properties
+    schema.properties.lessons.items.properties.imagePrompt = {
+        type: Type.STRING,
+        description: "A concise, descriptive prompt for a single visual aid (like a diagram, chart, or illustration) that would enhance this lesson. The prompt should be detailed enough for an AI image generator to create a relevant and high-quality visual. If no image is suitable, this should be an empty string."
+    };
+    
+    // Make imagePrompt required
+    schema.properties.lessons.items.required.push("imagePrompt");
+
+    return schema;
+};
+
+
+async function callGeminiWithSchema(prompt: string, schema: any): Promise<any> {
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: schema,
+        },
+    });
+
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: schema,
-                maxOutputTokens: 8192, 
-                thinkingConfig: { thinkingBudget: 2048 },
-            },
-        });
-
-        const jsonText = response.text.trim();
-        return JSON.parse(jsonText) as T;
-
-    } catch (error) {
-        console.error("Error calling Gemini API:", error);
-        throw new Error("Failed to generate content from the AI. The service may be busy or the request may be too complex. Please try again.");
+        let jsonStr = response.text.trim();
+        return JSON.parse(jsonStr);
+    } catch (e) {
+        console.error("Failed to parse JSON:", response.text);
+        throw new Error("AI returned invalid JSON format.");
     }
 }
 
 async function generateImage(prompt: string): Promise<string> {
     try {
+        console.log(`Generating image for prompt: ${prompt.substring(0, 100)}...`);
         const response = await ai.models.generateImages({
             model: 'imagen-4.0-generate-001',
             prompt: prompt,
             config: {
-                numberOfImages: 1,
-                outputMimeType: 'image/jpeg',
-                aspectRatio: '16:9',
+              numberOfImages: 1,
+              outputMimeType: 'image/jpeg',
             },
         });
-        return response.generatedImages[0].image.imageBytes;
+
+        if (!response.generatedImages || response.generatedImages.length === 0) {
+            throw new Error("AI did not return any images.");
+        }
+
+        const base64ImageBytes: string = response.generatedImages[0].image.imageBytes;
+        if (!base64ImageBytes) {
+            throw new Error("Generated image data is empty.");
+        }
+        
+        return base64ImageBytes;
+
     } catch (error) {
-        console.error("Error generating image with prompt:", prompt, error);
-        // Return an empty string or handle error as needed, so one failed image doesn't stop the whole course
-        return ""; 
+        console.error("Full image generation error:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to generate image. Reason: ${errorMessage}`);
     }
 }
 
-export async function* generateCourseStream(topic: string): AsyncGenerator<GenerationUpdate, void, void> {
-    
-    // Step 1: Generate Course Outline
-    yield { step: GenerationStep.Outlining, message: 'Researching topic & designing curriculum...' };
-    
-    const outlinePrompt = `You are an expert instructional designer. Create a course outline for the topic: "${topic}". The outline should include a course title, a one-paragraph description, 3-5 learning objectives, and a list of 3-7 module titles.`;
-    const outline = await callApi<CourseOutline>(outlinePrompt, outlineSchema);
-    
-    if (!outline.moduleTitles || outline.moduleTitles.length === 0) {
-        throw new Error("Failed to generate a valid course outline with modules.");
-    }
-    yield { step: GenerationStep.Outlining, message: 'Curriculum designed successfully.', payload: outline };
+export async function* generateCourseStream(topic: string, includeImages: boolean): AsyncGenerator<GenerationUpdate> {
+    yield { step: GenerationStep.Outlining, message: "Designing course curriculum..." };
 
-    const totalModules = outline.moduleTitles.length;
+    const outlinePrompt = `Create a comprehensive course outline for the topic: "${topic}". The outline should include a course title, a detailed description, 3-5 key learning objectives, and a list of 3-7 module titles.`;
+    const outline: CourseOutline = await callGeminiWithSchema(outlinePrompt, outlineSchema);
+    yield { step: GenerationStep.Outlining, message: "Curriculum designed.", payload: outline };
 
-    // Step 2: Generate each module's content and images
-    for (let i = 0; i < totalModules; i++) {
-        const moduleTitle = outline.moduleTitles[i];
-        yield { 
-            step: GenerationStep.GeneratingModules, 
-            message: `Generating Module ${i + 1}/${totalModules}: ${moduleTitle}`
-        };
+    const moduleSchema = getModuleSchema(includeImages);
 
-        const modulePrompt = `
-            You are an expert curriculum developer, video producer, and graphic designer. Generate the content for a single module of an online course about "${topic}".
-            The module is titled: "${moduleTitle}".
-            
-            The content should include:
-            1. A brief, one-sentence description of the module.
-            2. A list of 2-4 detailed lessons.
-            3. For each lesson, provide:
-                a. A title.
-                b. Comprehensive educational content (at least 250 words) formatted with markdown.
-                c. A detailed video script that transforms the lesson content into a visual presentation.
-                d. A concise, descriptive prompt for a single visual aid (like a diagram or illustration) to enhance the lesson. If no image is needed, omit the 'imagePrompt' field.
+    for (const moduleTitle of outline.moduleTitles) {
+        yield { step: GenerationStep.GeneratingModules, message: `Generating module: "${moduleTitle}"...` };
 
-            Ensure the generated JSON strictly follows the provided schema. The module title in the response must exactly match "${moduleTitle}".
-        `;
+        let modulePrompt = `You are an expert instructional designer. Generate the content for a course module titled "${moduleTitle}" on the main topic of "${topic}". The module should contain a brief description and a series of detailed, engaging lessons. For each lesson, provide a title, comprehensive content (at least 250 words, using markdown), and a full video script with scene descriptions.`;
 
-        const moduleContent = await callApi<Module>(modulePrompt, moduleSchema);
-        moduleContent.title = moduleTitle; // Ensure title consistency
+        if (includeImages) {
+             modulePrompt += ` Also provide a descriptive prompt for a relevant visual aid (diagram, chart, etc.). If no image is suitable for a particular lesson, provide an empty string for the imagePrompt.`;
+        }
 
-        // Step 2b: Generate images for lessons that have prompts
-        const lessonsWithImagePrompts = moduleContent.lessons.filter(l => l.imagePrompt && l.imagePrompt.trim());
-        if (lessonsWithImagePrompts.length > 0) {
-            yield { 
-                step: GenerationStep.GeneratingImages, 
-                message: `Creating visual aids for Module ${i + 1}...`
-            };
-
-            await Promise.all(lessonsWithImagePrompts.map(async (lesson) => {
-                if(lesson.imagePrompt) {
-                    const imageBase64 = await generateImage(lesson.imagePrompt);
-                    lesson.imageBase64 = imageBase64;
+        const module: Module = await callGeminiWithSchema(modulePrompt, moduleSchema);
+        
+        if (includeImages) {
+            for (const lesson of module.lessons) {
+                if (lesson.imagePrompt && lesson.imagePrompt.trim() !== "") {
+                    try {
+                        yield { step: GenerationStep.GeneratingImages, message: `Creating image for: "${lesson.title}"` };
+                        const imageBase64 = await generateImage(lesson.imagePrompt);
+                        lesson.imageBase64 = imageBase64;
+                    } catch (imgErr) {
+                        console.error(`Error generating image with prompt:\n${lesson.imagePrompt}\n`, imgErr);
+                        // Continue without the image
+                    }
                 }
-            }));
+            }
         }
         
-        yield { step: GenerationStep.GeneratingModules, message: `Completed Module ${i + 1}/${totalModules}`, payload: moduleContent };
+        yield { step: GenerationStep.GeneratingModules, message: `Completed module: ${module.title}`, payload: module };
     }
 }

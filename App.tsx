@@ -14,18 +14,20 @@ interface LogEntry {
 
 const App: React.FC = () => {
   const [topic, setTopic] = useState<string>('');
+  const [includeImages, setIncludeImages] = useState<boolean>(true);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generationLog, setGenerationLog] = useState<LogEntry[]>([]);
   const [course, setCourse] = useState<Course | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleGenerateCourse = useCallback(async (newTopic: string) => {
+  const handleGenerateCourse = useCallback(async (newTopic: string, generateImages: boolean) => {
     if (!newTopic.trim()) {
       setError('Please enter a topic.');
       return;
     }
     
     setTopic(newTopic);
+    setIncludeImages(generateImages);
     setIsGenerating(true);
     setCourse(null);
     setError(null);
@@ -38,7 +40,7 @@ const App: React.FC = () => {
         const log: LogEntry[] = [];
         let currentLogIndex = -1;
 
-        for await (const update of generateCourseStream(newTopic)) {
+        for await (const update of generateCourseStream(newTopic, generateImages)) {
             if (update.step === "OUTLINING") {
                 if (update.payload) { // Outline is done
                     log[currentLogIndex].isCompleted = true;
@@ -110,7 +112,12 @@ const App: React.FC = () => {
             Turn any topic into a comprehensive, ready-to-use course in minutes.
           </p>
         </div>
-        <TopicInput onSubmit={handleGenerateCourse} disabled={isGenerating} />
+        <TopicInput 
+          onSubmit={handleGenerateCourse} 
+          disabled={isGenerating} 
+          includeImages={includeImages}
+          setIncludeImages={setIncludeImages}
+        />
         {error && !isGenerating && <p className="text-red-400 text-center mt-4">{error}</p>}
       </div>
     );
