@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-// FIX: Removed unused 'Course' type as this component only deals with a single Lesson.
 import type { Lesson } from '../types';
 import {
   BookOpenIcon,
@@ -7,15 +6,13 @@ import {
   ChevronUpIcon,
   ClipboardCopyIcon,
   ImageIcon,
-  // FIX: Removed unused 'RefreshIcon' which is only used in CourseDisplay.
   VideoCameraIcon,
   CheckIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
 } from './Icons';
+import MarkdownRenderer from './MarkdownRenderer';
 
-// FIX: This file has been refactored to be a standalone component file for LessonDisplay,
-// which resolves the error caused by a duplicate and incomplete CourseDisplay component definition.
 interface LessonDisplayProps {
     lesson: Lesson;
     lessonId: string;
@@ -38,11 +35,6 @@ const LessonDisplay: React.FC<LessonDisplayProps> = ({ lesson, isOpen, onToggle,
                 setTimeout(() => setCopySuccess(false), 2000);
             });
         }
-    };
-
-    const renderMarkdown = (content: string) => {
-        // More robust markdown handling could be added here
-        return { __html: content.replace(/\n/g, '<br />') };
     };
 
     return (
@@ -69,7 +61,9 @@ const LessonDisplay: React.FC<LessonDisplayProps> = ({ lesson, isOpen, onToggle,
                     )}
                     <div>
                         <h5 className="text-sm font-semibold text-slate-400 mb-2 flex items-center gap-2"><BookOpenIcon /> Lesson Content</h5>
-                        <div className="prose prose-invert prose-slate text-slate-300 max-w-none" dangerouslySetInnerHTML={renderMarkdown(lesson.content)} />
+                        <div className="prose prose-invert prose-slate text-slate-300 max-w-none">
+                            <MarkdownRenderer content={lesson.content} />
+                        </div>
                     </div>
                     {lesson.videoScript && (
                          <div className="border-t border-slate-700 pt-4">
@@ -91,10 +85,9 @@ const LessonDisplay: React.FC<LessonDisplayProps> = ({ lesson, isOpen, onToggle,
                                     >
                                         {copySuccess ? <CheckIcon className="w-4 h-4 text-emerald-400" /> : <ClipboardCopyIcon className="w-4 h-4" />}
                                     </button>
-                                    <div
-                                        className="prose prose-invert prose-slate text-slate-300 max-w-none"
-                                        dangerouslySetInnerHTML={renderMarkdown(lesson.videoScript)}
-                                    />
+                                    <div className="prose prose-invert prose-slate text-slate-300 max-w-none">
+                                        <MarkdownRenderer content={lesson.videoScript} />
+                                    </div>
                                 </div>
                             )}
                         </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { Course, Lesson } from '../types';
+import type { Course, Lesson, Question } from '../types';
 import {
   BookOpenIcon,
   ChevronDownIcon,
@@ -13,9 +13,13 @@ import {
   ArrowRightIcon,
   SaveIcon,
   ExportIcon,
+  QuizIcon,
+  WorksheetIcon,
+  ResourcesIcon,
+  LinkIcon,
 } from './Icons';
-// FIX: Import LessonDisplay from its own file to follow component-based architecture best practices.
 import LessonDisplay from './LessonDisplay';
+import MarkdownRenderer from './MarkdownRenderer';
 
 interface CourseDisplayProps {
   course: Course;
@@ -36,6 +40,14 @@ const formatCourseForExport = (course: Course): string => {
     });
     content += `\n`;
 
+    if (course.sources && course.sources.length > 0) {
+        content += `## SOURCES & FURTHER READING\n`;
+        course.sources.forEach(source => {
+            content += `* [${source.title}](${source.url})\n`;
+        });
+        content += '\n';
+    }
+
     course.modules.forEach((module, moduleIndex) => {
         // Use a clear separator for each module
         content += `\n---\n\n`;
@@ -54,16 +66,94 @@ const formatCourseForExport = (course: Course): string => {
                 content += `${lesson.videoScript}\n\n`;
             }
         });
+
+        if (module.quiz) {
+            content += `\n#### QUIZ: ${module.quiz.title}\n\n`;
+            module.quiz.questions.forEach((q, i) => {
+                content += `${i + 1}. ${q.questionText}\n`;
+                q.options.forEach(opt => content += `   - ${opt}\n`);
+                content += `\n`;
+            });
+            content += `\n**--- QUIZ ANSWERS ---**\n\n`;
+            module.quiz.questions.forEach((q, i) => {
+                content += `${i + 1}. **Correct Answer:** ${q.correctAnswer}\n`;
+                content += `   **Explanation:** ${q.explanation}\n\n`;
+            });
+        }
+
+        if (module.worksheet) {
+            content += `\n#### WORKSHEET: ${module.worksheet.title}\n\n`;
+            content += `${module.worksheet.content}\n\n`;
+        }
+
+        if (module.resourceSheet) {
+            content += `\n#### RESOURCES: ${module.resourceSheet.title}\n\n`;
+            content += `${module.resourceSheet.content}\n\n`;
+        }
     });
 
     return content;
 };
 
+const QuizDisplay: React.FC<{ quiz: NonNullable<Course['modules'][0]['quiz']>, moduleIndex: number }> = ({ quiz, moduleIndex }) => {
+    const [showAnswers, setShowAnswers] = useState(false);
+    return (
+        <div className="bg-slate-900 rounded-md border border-slate-600">
+            <div className='p-3'>
+                <h4 className="font-semibold text-lg text-amber-400 flex items-center gap-2"><QuizIcon /> {quiz.title}</h4>
+                <div className="mt-4 space-y-4">
+                    {quiz.questions.map((q, qIndex) => (
+                        <div key={qIndex} className="p-3 bg-slate-800/50 rounded">
+                            <p className="font-semibold text-slate-300">{qIndex + 1}. {q.questionText}</p>
+                            <ul className="list-disc list-inside pl-4 mt-2 space-y-1 text-slate-400">
+                                {q.options.map((opt, oIndex) => <li key={oIndex}>{opt}</li>)}
+                            </ul>
+                            {showAnswers && (
+                                <div className="mt-3 p-3 bg-emerald-900/40 border-l-4 border-emerald-500 rounded-r">
+                                    <p className="font-bold text-emerald-400">Correct Answer: <span className="font-normal">{q.correctAnswer}</span></p>
+                                    <p className="text-sm text-slate-300 mt-1"><span className="font-semibold">Explanation:</span> {q.explanation}</p>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+                <button
+                    onClick={() => setShowAnswers(!showAnswers)}
+                    className="mt-4 px-4 py-2 text-sm font-semibold rounded-md bg-sky-700 hover:bg-sky-600 transition-colors"
+                >
+                    {showAnswers ? 'Hide Answers' : 'Show Answers'}
+                </button>
+            </div>
+        </div>
+    );
+};
 
-// FIX: Removed the in-file LessonDisplay component and its props interface. It is now imported from its dedicated file.
+const AssetDisplay: React.FC<{ title: string; content: string; icon: React.ReactNode }> = ({ title, icon, content }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    return (
+        <div className="bg-slate-900 rounded-md border border-slate-600">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex justify-between items-center text-left p-3 hover:bg-slate-800/80 transition-colors"
+                aria-expanded={isOpen}
+            >
+                <h4 className="font-semibold text-lg text-amber-400 flex items-center gap-2">{icon} {title}</h4>
+                {isOpen ? <ChevronUpIcon className="w-5 h-5 text-slate-500" /> : <ChevronDownIcon className="w-5 h-5 text-slate-500" />}
+            </button>
+            {isOpen && (
+                 <div className="p-4 border-t border-slate-700">
+                    <div className="prose prose-invert prose-slate text-slate-300 max-w-none">
+                       <MarkdownRenderer content={content} />
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const CourseDisplay: React.FC<CourseDisplayProps> = ({ course, onReset, onSave }) => {
   const [openModules, setOpenModules] = useState<{ [key: string]: boolean }>({});
-  const [openLessons, setOpenLessons] = useState<{ [key: string]: boolean }>({});
+  const [openLessons, setOpenLessons] = useState<{ [key:string]: boolean }>({});
   const [isSaved, setIsSaved] = useState<boolean>(false);
 
   const toggleModule = (id: string) => {
@@ -104,7 +194,7 @@ const CourseDisplay: React.FC<CourseDisplayProps> = ({ course, onReset, onSave }
     const link = document.createElement('a');
     link.href = url;
     const safeFilename = course.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-    link.download = `${safeFilename}.txt`;
+    link.download = `${safeFilename}_course.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -151,6 +241,23 @@ const CourseDisplay: React.FC<CourseDisplayProps> = ({ course, onReset, onSave }
                 {course.learningObjectives.map((obj, i) => <li key={i}>{obj}</li>)}
             </ul>
         </div>
+        
+        {course.sources && course.sources.length > 0 && (
+            <div>
+                <h2 className="text-2xl font-bold text-sky-400 mb-4 border-b-2 border-slate-700 pb-2 flex items-center gap-2">
+                    <LinkIcon /> Sources & Further Reading
+                </h2>
+                <ul className="list-disc list-inside space-y-2 pl-4">
+                    {course.sources.map((source, i) => (
+                        <li key={i} className="text-slate-300">
+                           <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:text-sky-300 hover:underline transition-colors">
+                                {source.title}
+                           </a>
+                        </li>
+                    ))}
+                </ul>
+            </div>
+        )}
 
         <div>
             <h2 className="text-2xl font-bold text-sky-400 mb-4 border-b-2 border-slate-700 pb-2">Course Modules</h2>
@@ -188,6 +295,12 @@ const CourseDisplay: React.FC<CourseDisplayProps> = ({ course, onReset, onSave }
                                             />
                                         );
                                     })}
+                                </div>
+                                
+                                <div className="mt-6 pt-4 border-t border-slate-700 space-y-3">
+                                    {module.quiz && <QuizDisplay quiz={module.quiz} moduleIndex={moduleIndex} />}
+                                    {module.worksheet && <AssetDisplay title={module.worksheet.title} content={module.worksheet.content} icon={<WorksheetIcon />} />}
+                                    {module.resourceSheet && <AssetDisplay title={module.resourceSheet.title} content={module.resourceSheet.content} icon={<ResourcesIcon />} />}
                                 </div>
                             </div>
                         )}

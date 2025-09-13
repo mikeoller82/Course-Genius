@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import type { Course, CourseOutline, Module } from './types';
 import { Difficulty } from './types';
@@ -28,6 +27,7 @@ const App: React.FC = () => {
   // State for progress calculation
   const [totalModules, setTotalModules] = useState(0);
   const [completedModules, setCompletedModules] = useState(0);
+  const [researchComplete, setResearchComplete] = useState(false);
   const [outlineComplete, setOutlineComplete] = useState(false);
 
   useEffect(() => {
@@ -57,6 +57,7 @@ const App: React.FC = () => {
     // Reset progress state
     setTotalModules(0);
     setCompletedModules(0);
+    setResearchComplete(false);
     setOutlineComplete(false);
 
     const tempCourse: Partial<Course> = {};
@@ -67,7 +68,16 @@ const App: React.FC = () => {
         let currentLogIndex = -1;
 
         for await (const update of generateCourseStream(newTopic, generateImages, newDifficulty)) {
-            if (update.step === "OUTLINING") {
+            if (update.step === "RESEARCHING") {
+                if (update.payload) { // Research is done
+                    log[currentLogIndex].isCompleted = true;
+                    setResearchComplete(true);
+                    Object.assign(tempCourse, { sources: update.payload.sources });
+                } else { // Research is starting
+                    log.push({ message: update.message, isCompleted: false });
+                    currentLogIndex++;
+                }
+            } else if (update.step === "OUTLINING") {
                 if (update.payload) { // Outline is done
                     log[currentLogIndex].isCompleted = true;
                     const outline = update.payload as CourseOutline;
@@ -156,10 +166,10 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     if (isGenerating) {
-      // Give outlining 10% of the progress, and the rest to modules
+      // Allocate progress percentages: Research (10%), Outlining (10%), Modules (80%)
       const progress = totalModules > 0
-        ? ((outlineComplete ? 0.1 : 0) + (completedModules / totalModules) * 0.9) * 100
-        : 0;
+        ? ((researchComplete ? 0.1 : 0) + (outlineComplete ? 0.1 : 0) + (completedModules / totalModules) * 0.8) * 100
+        : (researchComplete ? 10 : 0);
       return <LoadingState log={generationLog} progress={progress} />;
     }
     if (course) {
@@ -200,7 +210,7 @@ const App: React.FC = () => {
         {renderContent()}
       </main>
       <footer className="w-full text-center p-4 text-slate-500 text-sm mt-8">
-        Powered by Google Gemini
+        Powered by Google Gemini & Firecrawl
       </footer>
     </div>
   );

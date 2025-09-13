@@ -1,4 +1,3 @@
-
 export enum Difficulty {
   Beginner = "Beginner",
   Intermediate = "Intermediate",
@@ -13,17 +12,48 @@ export interface Lesson {
   imageBase64?: string;
 }
 
+export interface Question {
+  questionText: string;
+  options: string[];
+  correctAnswer: string;
+  explanation: string;
+}
+
+export interface Quiz {
+  title: string;
+  questions: Question[];
+}
+
+export interface Worksheet {
+  title: string;
+  content: string; // Markdown formatted
+}
+
+export interface ResourceSheet {
+  title: string;
+  content: string; // Markdown formatted
+}
+
 export interface Module {
   title: string;
   description: string;
   lessons: Lesson[];
+  quiz?: Quiz;
+  worksheet?: Worksheet;
+  resourceSheet?: ResourceSheet;
+}
+
+export interface Source {
+  title: string;
+  url: string;
 }
 
 export interface Course {
-  title: string;
+  title:string;
   description: string;
   learningObjectives: string[];
   modules: Module[];
+  sources?: Source[];
 }
 
 export interface CourseOutline {
@@ -31,10 +61,12 @@ export interface CourseOutline {
   description: string;
   learningObjectives: string[];
   moduleTitles: string[];
+  sources?: Source[];
 }
 
 export enum GenerationStep {
   Idle = "IDLE",
+  RESEARCHING = "RESEARCHING",
   Outlining = "OUTLINING",
   GeneratingModules = "GENERATING_MODULES",
   GeneratingImages = "GENERATING_IMAGES",
