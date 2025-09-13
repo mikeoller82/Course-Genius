@@ -1,6 +1,7 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import type { Course, CourseOutline, Module } from './types';
+import { Difficulty } from './types';
 import { generateCourseStream } from './services/geminiService';
 import TopicInput from './components/TopicInput';
 import LoadingState from './components/LoadingState';
@@ -12,15 +13,34 @@ interface LogEntry {
   isCompleted: boolean;
 }
 
+const LOCAL_STORAGE_KEY = 'ai-course-generator-saved-course';
+
 const App: React.FC = () => {
   const [topic, setTopic] = useState<string>('');
   const [includeImages, setIncludeImages] = useState<boolean>(true);
+  const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.Beginner);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generationLog, setGenerationLog] = useState<LogEntry[]>([]);
   const [course, setCourse] = useState<Course | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [savedCourseExists, setSavedCourseExists] = useState<boolean>(false);
 
-  const handleGenerateCourse = useCallback(async (newTopic: string, generateImages: boolean) => {
+  // State for progress calculation
+  const [totalModules, setTotalModules] = useState(0);
+  const [completedModules, setCompletedModules] = useState(0);
+  const [outlineComplete, setOutlineComplete] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedCourse = localStorage.getItem(LOCAL_STORAGE_KEY);
+      setSavedCourseExists(!!savedCourse);
+    } catch (e) {
+      console.error("Could not access local storage", e);
+      setSavedCourseExists(false);
+    }
+  }, []);
+
+  const handleGenerateCourse = useCallback(async (newTopic: string, generateImages: boolean, newDifficulty: Difficulty) => {
     if (!newTopic.trim()) {
       setError('Please enter a topic.');
       return;
@@ -28,10 +48,16 @@ const App: React.FC = () => {
     
     setTopic(newTopic);
     setIncludeImages(generateImages);
+    setDifficulty(newDifficulty);
     setIsGenerating(true);
     setCourse(null);
     setError(null);
     setGenerationLog([]);
+
+    // Reset progress state
+    setTotalModules(0);
+    setCompletedModules(0);
+    setOutlineComplete(false);
 
     const tempCourse: Partial<Course> = {};
     const tempModules: Module[] = [];
@@ -40,11 +66,13 @@ const App: React.FC = () => {
         const log: LogEntry[] = [];
         let currentLogIndex = -1;
 
-        for await (const update of generateCourseStream(newTopic, generateImages)) {
+        for await (const update of generateCourseStream(newTopic, generateImages, newDifficulty)) {
             if (update.step === "OUTLINING") {
                 if (update.payload) { // Outline is done
                     log[currentLogIndex].isCompleted = true;
                     const outline = update.payload as CourseOutline;
+                    setOutlineComplete(true);
+                    setTotalModules(outline.moduleTitles.length);
                     Object.assign(tempCourse, { ...outline });
                 } else { // Outline is starting
                     log.push({ message: update.message, isCompleted: false });
@@ -53,6 +81,7 @@ const App: React.FC = () => {
             } else if (update.step === "GENERATING_MODULES") {
                  if (update.payload) { // Module is done
                     log[currentLogIndex].isCompleted = true;
+                    setCompletedModules(prev => prev + 1);
                     tempModules.push(update.payload as Module);
                 } else { // New module is starting
                     log.push({ message: update.message, isCompleted: false });
@@ -95,12 +124,46 @@ const App: React.FC = () => {
     setGenerationLog([]);
   };
 
+  const handleSaveCourse = () => {
+    if (course) {
+        try {
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(course));
+            setSavedCourseExists(true);
+        } catch (e) {
+            console.error("Failed to save course to local storage", e);
+            setError("Could not save the course. Storage might be full.");
+        }
+    }
+  };
+
+  const handleLoadCourse = () => {
+    try {
+        const savedCourseJSON = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (savedCourseJSON) {
+            const savedCourse = JSON.parse(savedCourseJSON);
+            setCourse(savedCourse);
+            setError(null);
+            setIsGenerating(false);
+        }
+    } catch (e) {
+        console.error("Failed to load or parse course from storage", e);
+        setError("Failed to load course. It might be corrupted.");
+        localStorage.removeItem(LOCAL_STORAGE_KEY);
+        setSavedCourseExists(false);
+    }
+  };
+
+
   const renderContent = () => {
     if (isGenerating) {
-      return <LoadingState log={generationLog} />;
+      // Give outlining 10% of the progress, and the rest to modules
+      const progress = totalModules > 0
+        ? ((outlineComplete ? 0.1 : 0) + (completedModules / totalModules) * 0.9) * 100
+        : 0;
+      return <LoadingState log={generationLog} progress={progress} />;
     }
     if (course) {
-      return <CourseDisplay course={course} onReset={handleReset} />;
+      return <CourseDisplay course={course} onReset={handleReset} onSave={handleSaveCourse} />;
     }
     return (
       <div className="w-full max-w-2xl mx-auto">
@@ -117,6 +180,10 @@ const App: React.FC = () => {
           disabled={isGenerating} 
           includeImages={includeImages}
           setIncludeImages={setIncludeImages}
+          difficulty={difficulty}
+          setDifficulty={setDifficulty}
+          onLoadCourse={handleLoadCourse}
+          savedCourseExists={savedCourseExists}
         />
         {error && !isGenerating && <p className="text-red-400 text-center mt-4">{error}</p>}
       </div>

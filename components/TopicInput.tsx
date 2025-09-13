@@ -1,21 +1,26 @@
 
 import React, { useState } from 'react';
-import { SparklesIcon } from './Icons';
+import { SparklesIcon, LoadIcon } from './Icons';
+import { Difficulty } from '../types';
 
 interface TopicInputProps {
-  onSubmit: (topic: string, includeImages: boolean) => void;
+  onSubmit: (topic: string, includeImages: boolean, difficulty: Difficulty) => void;
+  onLoadCourse: () => void;
+  savedCourseExists: boolean;
   disabled: boolean;
   includeImages: boolean;
   setIncludeImages: (include: boolean) => void;
+  difficulty: Difficulty;
+  setDifficulty: (difficulty: Difficulty) => void;
 }
 
-const TopicInput: React.FC<TopicInputProps> = ({ onSubmit, disabled, includeImages, setIncludeImages }) => {
+const TopicInput: React.FC<TopicInputProps> = ({ onSubmit, disabled, includeImages, setIncludeImages, difficulty, setDifficulty, onLoadCourse, savedCourseExists }) => {
   const [topic, setTopic] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (topic.trim() && !disabled) {
-      onSubmit(topic, includeImages);
+      onSubmit(topic, includeImages, difficulty);
     }
   };
 
@@ -29,7 +34,28 @@ const TopicInput: React.FC<TopicInputProps> = ({ onSubmit, disabled, includeImag
         rows={3}
         disabled={disabled}
       />
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
+
+      <div className="w-full flex flex-col items-center gap-4">
+        <div className="flex flex-col sm:flex-row justify-center items-center gap-x-6 gap-y-3 text-slate-400">
+          <span className="font-semibold text-slate-300">Difficulty:</span>
+          {Object.values(Difficulty).map((level) => (
+            <label key={level} className="flex items-center gap-2 cursor-pointer hover:text-slate-200">
+              <input
+                type="radio"
+                name="difficulty"
+                value={level}
+                checked={difficulty === level}
+                onChange={() => setDifficulty(level)}
+                disabled={disabled}
+                className="w-4 h-4 text-sky-500 bg-slate-700 border-slate-600 focus:ring-sky-600 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              {level}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full mt-2">
         <button
           type="submit"
           disabled={disabled || !topic.trim()}
@@ -52,6 +78,17 @@ const TopicInput: React.FC<TopicInputProps> = ({ onSubmit, disabled, includeImag
             </label>
         </div>
       </div>
+       {savedCourseExists && (
+        <button
+          type="button"
+          onClick={onLoadCourse}
+          disabled={disabled}
+          className="flex items-center justify-center gap-2 mt-4 px-6 py-2 bg-slate-700/50 text-slate-300 font-medium rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors duration-200"
+        >
+          <LoadIcon />
+          Load Saved Course
+        </button>
+      )}
     </form>
   );
 };

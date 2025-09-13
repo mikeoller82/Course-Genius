@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { CheckIcon, SpinnerIcon, DocumentIcon } from './Icons';
 
@@ -8,12 +9,26 @@ interface LogEntry {
 
 interface LoadingStateProps {
   log: LogEntry[];
+  progress: number;
 }
 
-const LoadingState: React.FC<LoadingStateProps> = ({ log }) => {
+const LoadingState: React.FC<LoadingStateProps> = ({ log, progress }) => {
     return (
         <div className="w-full max-w-lg mx-auto bg-slate-800/50 backdrop-blur-sm p-8 rounded-xl border border-slate-700 shadow-2xl">
             <h2 className="text-2xl font-bold text-center text-sky-400 mb-6">Building Your Course</h2>
+            
+            <div className="mb-6">
+                <div className="w-full bg-slate-700 rounded-full h-2.5">
+                    <div
+                        className="bg-gradient-to-r from-sky-500 to-emerald-400 h-2.5 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${progress}%` }}
+                    ></div>
+                </div>
+                <p className="text-center text-sm text-slate-400 mt-2 font-medium" aria-live="polite">
+                    {Math.round(progress)}% Complete
+                </p>
+            </div>
+
             <div className="space-y-4">
                 {log.map((entry, index) => {
                     const isActive = !entry.isCompleted;

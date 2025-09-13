@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import type { Course, CourseOutline, Module, GenerationUpdate, Lesson } from '../types';
-import { GenerationStep } from '../types';
+import { GenerationStep, Difficulty } from '../types';
 
 if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set");
@@ -124,22 +124,40 @@ async function generateImage(prompt: string): Promise<string> {
     }
 }
 
-export async function* generateCourseStream(topic: string, includeImages: boolean): AsyncGenerator<GenerationUpdate> {
+export async function* generateCourseStream(topic: string, includeImages: boolean, difficulty: Difficulty): AsyncGenerator<GenerationUpdate> {
     yield { step: GenerationStep.Outlining, message: "Designing course curriculum..." };
 
-    const outlinePrompt = `Create a comprehensive course outline for the topic: "${topic}". The outline should include a course title, a detailed description, 3-5 key learning objectives, and a list of 3-7 module titles.`;
+    const outlinePrompt = `Create a comprehensive course outline for the topic: "${topic}". The course must be tailored for a **${difficulty}** audience. The outline should include a course title, a detailed description, 3-5 key learning objectives, and a list of 3-7 module titles designed for progressive learning.`;
     const outline: CourseOutline = await callGeminiWithSchema(outlinePrompt, outlineSchema);
     yield { step: GenerationStep.Outlining, message: "Curriculum designed.", payload: outline };
 
     const moduleSchema = getModuleSchema(includeImages);
+    const allModuleTitlesString = outline.moduleTitles.join('", "');
 
-    for (const moduleTitle of outline.moduleTitles) {
+    for (const [index, moduleTitle] of outline.moduleTitles.entries()) {
         yield { step: GenerationStep.GeneratingModules, message: `Generating module: "${moduleTitle}"...` };
 
-        let modulePrompt = `You are an expert instructional designer. Generate the content for a course module titled "${moduleTitle}" on the main topic of "${topic}". The module should contain a brief description and a series of detailed, engaging lessons. For each lesson, provide a title, comprehensive content (at least 250 words, using markdown), and a full video script with scene descriptions.`;
+        const previousModuleTitles = outline.moduleTitles.slice(0, index);
+        const contextInstruction = previousModuleTitles.length > 0
+            ? `This module must build upon concepts from the previous modules: "${previousModuleTitles.join('", "')}". Do NOT repeat information already covered.`
+            : "This is the first module, so it should introduce the foundational concepts of the course.";
+
+        let modulePrompt = `You are an expert instructional designer building a course about "${topic}" for a **${difficulty}** audience.
+The entire course is structured into these modules, in this order: "${allModuleTitlesString}".
+
+Your current task is to generate the content for the module titled: "${moduleTitle}".
+
+**CRITICAL Directives:**
+1.  **Progressive Learning:** ${contextInstruction} Introduce new, more advanced topics specific to this module.
+2.  **Unique Content:** Ensure the lessons within this module are distinct, valuable, and do not regurgitate information from earlier in the course.
+3.  **Required Output:** For this module, provide a brief description and a series of detailed lessons. For each lesson, you must generate:
+    a. A lesson title.
+    b. Comprehensive lesson content (at least 250 words, formatted with markdown).
+    c. A detailed video script that corresponds to the lesson content.
+`;
 
         if (includeImages) {
-             modulePrompt += ` Also provide a descriptive prompt for a relevant visual aid (diagram, chart, etc.). If no image is suitable for a particular lesson, provide an empty string for the imagePrompt.`;
+             modulePrompt += `    d. A descriptive prompt for an AI to generate a relevant visual aid. If no image is needed, return an empty string for the prompt.`;
         }
 
         const module: Module = await callGeminiWithSchema(modulePrompt, moduleSchema);

@@ -9,101 +9,106 @@ import {
   RefreshIcon,
   VideoCameraIcon,
   CheckIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  SaveIcon,
+  ExportIcon,
 } from './Icons';
+// FIX: Import LessonDisplay from its own file to follow component-based architecture best practices.
+import LessonDisplay from './LessonDisplay';
 
 interface CourseDisplayProps {
   course: Course;
   onReset: () => void;
+  onSave: () => void;
 }
 
-interface LessonDisplayProps {
-    lesson: Lesson;
-    lessonId: string;
-}
+const formatCourseForExport = (course: Course): string => {
+    // A more readable, markdown-style format for the exported text file.
+    let content = `# COURSE: ${course.title}\n\n`;
+    
+    content += `## DESCRIPTION\n`;
+    content += `${course.description}\n\n`;
+    
+    content += `## LEARNING OBJECTIVES\n`;
+    course.learningObjectives.forEach(obj => {
+        content += `* ${obj}\n`;
+    });
+    content += `\n`;
 
-const LessonDisplay: React.FC<LessonDisplayProps> = ({ lesson, lessonId }) => {
-    const [isContentOpen, setIsContentOpen] = useState(false);
-    const [isScriptOpen, setIsScriptOpen] = useState(false);
-    const [copySuccess, setCopySuccess] = useState(false);
+    course.modules.forEach((module, moduleIndex) => {
+        // Use a clear separator for each module
+        content += `\n---\n\n`;
+        content += `# MODULE ${moduleIndex + 1}: ${module.title}\n\n`;
+        content += `**Module Description:** ${module.description}\n\n`;
 
-    const handleCopyScript = () => {
-        if (lesson.videoScript) {
-            navigator.clipboard.writeText(lesson.videoScript).then(() => {
-                setCopySuccess(true);
-                setTimeout(() => setCopySuccess(false), 2000);
-            });
-        }
-    };
+        module.lessons.forEach((lesson, lessonIndex) => {
+            content += `### Lesson ${moduleIndex + 1}.${lessonIndex + 1}: ${lesson.title}\n\n`;
+            
+            content += `#### CONTENT\n`;
+            // The content from Gemini is already markdown-formatted.
+            content += `${lesson.content}\n\n`;
+            
+            if (lesson.videoScript) {
+                content += `#### VIDEO SCRIPT\n`;
+                content += `${lesson.videoScript}\n\n`;
+            }
+        });
+    });
 
-    const renderMarkdown = (content: string) => {
-        // More robust markdown handling could be added here
-        return { __html: content.replace(/\n/g, '<br />') };
-    };
-
-    return (
-        <div className="bg-slate-900 rounded-md border border-slate-600">
-            <button
-                onClick={() => setIsContentOpen(!isContentOpen)}
-                className="w-full flex justify-between items-center text-left p-3 hover:bg-slate-800/80 transition-colors"
-            >
-                <h4 className="font-semibold text-sky-400">{lesson.title}</h4>
-                {isContentOpen ? <ChevronUpIcon className="w-5 h-5 text-slate-500" /> : <ChevronDownIcon className="w-5 h-5 text-slate-500" />}
-            </button>
-            {isContentOpen && (
-                <div className="p-4 border-t border-slate-700 space-y-6">
-                    {lesson.imageBase64 && (
-                        <div className="my-4">
-                            <h5 className="text-sm font-semibold text-slate-400 mb-2 flex items-center gap-2"><ImageIcon /> Visual Aid</h5>
-                            <img
-                                src={`data:image/jpeg;base64,${lesson.imageBase64}`}
-                                alt={lesson.imagePrompt || `Visual for ${lesson.title}`}
-                                className="rounded-lg w-full max-w-md mx-auto shadow-lg border border-slate-600"
-                            />
-                        </div>
-                    )}
-                    <div>
-                        <h5 className="text-sm font-semibold text-slate-400 mb-2 flex items-center gap-2"><BookOpenIcon /> Lesson Content</h5>
-                        <div className="prose prose-invert prose-slate text-slate-300 max-w-none" dangerouslySetInnerHTML={renderMarkdown(lesson.content)} />
-                    </div>
-                    {lesson.videoScript && (
-                         <div className="border-t border-slate-700 pt-4">
-                            <button
-                                onClick={() => setIsScriptOpen(!isScriptOpen)}
-                                className="flex items-center gap-2 text-sm font-semibold text-slate-300 hover:text-sky-400 transition-colors"
-                            >
-                                <VideoCameraIcon />
-                                {isScriptOpen ? 'Hide' : 'View'} Video Script
-                                {isScriptOpen ? <ChevronUpIcon className="w-4 h-4" /> : <ChevronDownIcon className="w-4 h-4" />}
-                            </button>
-                            {isScriptOpen && (
-                                <div className="mt-3 relative bg-slate-900/70 p-4 rounded-md text-sm">
-                                    <button
-                                        onClick={handleCopyScript}
-                                        className="absolute top-2 right-2 p-1.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-all"
-                                        aria-label="Copy script"
-                                    >
-                                        {copySuccess ? <CheckIcon className="w-4 h-4 text-emerald-400" /> : <ClipboardCopyIcon className="w-4 h-4" />}
-                                    </button>
-                                    <div
-                                        className="prose prose-invert prose-slate text-slate-300 max-w-none"
-                                        dangerouslySetInnerHTML={renderMarkdown(lesson.videoScript)}
-                                    />
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
+    return content;
 };
 
 
-const CourseDisplay: React.FC<CourseDisplayProps> = ({ course, onReset }) => {
+// FIX: Removed the in-file LessonDisplay component and its props interface. It is now imported from its dedicated file.
+const CourseDisplay: React.FC<CourseDisplayProps> = ({ course, onReset, onSave }) => {
   const [openModules, setOpenModules] = useState<{ [key: string]: boolean }>({});
+  const [openLessons, setOpenLessons] = useState<{ [key: string]: boolean }>({});
+  const [isSaved, setIsSaved] = useState<boolean>(false);
 
   const toggleModule = (id: string) => {
     setOpenModules(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+  
+  const toggleLesson = (id: string) => {
+    setOpenLessons(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleLessonNavigation = (moduleIndex: number, currentLessonIndex: number, direction: 'prev' | 'next') => {
+    const nextLessonIndex = direction === 'next' ? currentLessonIndex + 1 : currentLessonIndex - 1;
+    
+    if (nextLessonIndex < 0 || nextLessonIndex >= course.modules[moduleIndex].lessons.length) {
+        return;
+    }
+
+    const currentLessonId = `lesson-${moduleIndex}-${currentLessonIndex}`;
+    const nextLessonId = `lesson-${moduleIndex}-${nextLessonIndex}`;
+
+    setOpenLessons(prev => ({
+        ...prev,
+        [currentLessonId]: false,
+        [nextLessonId]: true,
+    }));
+  };
+
+  const handleSave = () => {
+      onSave();
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 2500);
+  };
+
+  const handleExport = () => {
+    const courseContent = formatCourseForExport(course);
+    const blob = new Blob([courseContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const safeFilename = course.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    link.download = `${safeFilename}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -113,13 +118,30 @@ const CourseDisplay: React.FC<CourseDisplayProps> = ({ course, onReset }) => {
           {course.title}
         </h1>
         <p className="text-slate-400 max-w-2xl mx-auto">{course.description}</p>
-        <button
-            onClick={onReset}
-            className="mt-6 flex items-center justify-center gap-2 mx-auto px-6 py-2 bg-slate-700 text-slate-300 font-semibold rounded-lg hover:bg-slate-600 transition-colors duration-200"
-        >
-            <RefreshIcon className="w-5 h-5" />
-            Create New Course
-        </button>
+        <div className="mt-6 flex items-center justify-center flex-wrap gap-4">
+            <button
+                onClick={onReset}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-700 text-slate-300 font-semibold rounded-lg hover:bg-slate-600 transition-colors duration-200"
+            >
+                <RefreshIcon className="w-5 h-5" />
+                Create New Course
+            </button>
+             <button
+                onClick={handleSave}
+                disabled={isSaved}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-700 text-slate-300 font-semibold rounded-lg hover:bg-slate-600 transition-colors duration-200 disabled:bg-emerald-600 disabled:text-white"
+            >
+                {isSaved ? <CheckIcon className="w-5 h-5" /> : <SaveIcon className="w-5 h-5" />}
+                {isSaved ? 'Saved!' : 'Save Course'}
+            </button>
+            <button
+                onClick={handleExport}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-700 text-slate-300 font-semibold rounded-lg hover:bg-slate-600 transition-colors duration-200"
+            >
+                <ExportIcon className="w-5 h-5" />
+                Export as .txt
+            </button>
+        </div>
       </header>
 
       <div className="space-y-6">
@@ -148,13 +170,24 @@ const CourseDisplay: React.FC<CourseDisplayProps> = ({ course, onReset }) => {
                         {openModules[`module-${moduleIndex}`] && (
                             <div className="bg-slate-800/50 p-4 border-t border-slate-700">
                                 <div className="space-y-3">
-                                    {module.lessons.map((lesson, lessonIndex) => (
-                                        <LessonDisplay
-                                            key={lessonIndex}
-                                            lesson={lesson}
-                                            lessonId={`lesson-${moduleIndex}-${lessonIndex}`}
-                                        />
-                                    ))}
+                                    {module.lessons.map((lesson, lessonIndex) => {
+                                        const lessonId = `lesson-${moduleIndex}-${lessonIndex}`;
+                                        const isFirst = lessonIndex === 0;
+                                        const isLast = lessonIndex === module.lessons.length - 1;
+                                        return (
+                                            <LessonDisplay
+                                                key={lessonIndex}
+                                                lesson={lesson}
+                                                lessonId={lessonId}
+                                                isOpen={!!openLessons[lessonId]}
+                                                onToggle={() => toggleLesson(lessonId)}
+                                                onNavigatePrev={() => handleLessonNavigation(moduleIndex, lessonIndex, 'prev')}
+                                                onNavigateNext={() => handleLessonNavigation(moduleIndex, lessonIndex, 'next')}
+                                                isFirst={isFirst}
+                                                isLast={isLast}
+                                            />
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}

@@ -1,4 +1,10 @@
 
+export enum Difficulty {
+  Beginner = "Beginner",
+  Intermediate = "Intermediate",
+  Advanced = "Advanced",
+}
+
 export interface Lesson {
   title: string;
   content: string;
