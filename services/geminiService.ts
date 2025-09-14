@@ -1,248 +1,216 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import type { CourseOutline, Module, GenerationUpdate, Lesson, Source } from '../types';
-import { GenerationStep, Difficulty } from '../types';
+import type { CourseOutline, Module, Difficulty, CourseFormat, GenerationUpdate, Source } from '../types';
+import { GenerationStep } from '../types';
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
-
+// Per instructions, API key is handled by the environment.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const outlineSchema = {
-    type: Type.OBJECT,
-    properties: {
-        title: { type: Type.STRING, description: "A compelling and professional title for the course." },
-        description: { type: Type.STRING, description: "A detailed, one-paragraph summary of the course, outlining what students will learn." },
-        learningObjectives: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "A list of 3-5 key learning objectives. Each objective should be a clear, concise statement starting with a verb."
-        },
-        moduleTitles: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "A list of concise, descriptive titles for each module in the course. Should be between 3 and 7 modules."
-        }
-    },
-    required: ["title", "description", "learningObjectives", "moduleTitles"],
+const cleanJson = (text: string): string => {
+    // Attempts to extract a valid JSON object from a string that might be wrapped in markdown.
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    // Fallback for cases where there are no markdown backticks
+    return text.trim();
 };
 
-// Base module schema without imagePrompt
-const baseModuleSchema = {
+const moduleSchema = {
     type: Type.OBJECT,
     properties: {
-        title: { type: Type.STRING, description: "The title of this course module." },
-        description: { type: Type.STRING, description: "A brief, one-sentence description of what this module covers." },
+        title: { type: Type.STRING },
+        description: { type: Type.STRING },
         lessons: {
             type: Type.ARRAY,
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    title: { type: Type.STRING, description: "The title of this specific lesson." },
-                    content: { type: Type.STRING, description: "The full educational content for this lesson, written in a clear, engaging, and comprehensive manner. Should be at least 250 words and formatted with markdown for readability (e.g., using headers, lists, bold text)." },
-                    videoScript: {
-                        type: Type.STRING,
-                        description: "A detailed video script for this lesson, including scene descriptions (e.g., '[SCENE: Whiteboard with diagrams]') and narration. The script should directly correspond to the lesson content, transforming it into a visual and spoken format."
-                    },
+                    title: { type: Type.STRING },
+                    content: { type: Type.STRING, description: "Lesson content in Markdown format." },
+                    videoScript: { type: Type.STRING, description: "A short video script for this lesson. Can be null." },
+                    imagePrompt: { type: Type.STRING, description: "A descriptive prompt for an AI image generator to create a relevant image for this lesson. Focus on clear, concrete subjects. Can be null." },
                 },
-                required: ["title", "content", "videoScript"],
+                required: ["title", "content"]
             }
+        },
+        quiz: {
+            type: Type.OBJECT,
+            properties: {
+                title: { type: Type.STRING },
+                questions: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            questionText: { type: Type.STRING },
+                            options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                            correctAnswer: { type: Type.STRING },
+                            explanation: { type: Type.STRING }
+                        },
+                        required: ["questionText", "options", "correctAnswer", "explanation"]
+                    }
+                }
+            },
+        },
+        worksheet: {
+            type: Type.OBJECT,
+            properties: {
+                title: { type: Type.STRING },
+                content: { type: Type.STRING, description: "Worksheet content in Markdown format." }
+            },
+        },
+        resourceSheet: {
+            type: Type.OBJECT,
+            properties: {
+                title: { type: Type.STRING },
+                content: { type: Type.STRING, description: "A list of additional resources in Markdown format." }
+            },
         }
     },
-    required: ["title", "description", "lessons"],
-};
-
-// Function to dynamically create the module schema
-const getModuleSchema = (includeImages: boolean) => {
-    // Create a deep copy to avoid mutating the base schema
-    const schema = JSON.parse(JSON.stringify(baseModuleSchema));
-
-    if (includeImages) {
-        // Add imagePrompt to lesson properties
-        schema.properties.lessons.items.properties.imagePrompt = {
-            type: Type.STRING,
-            description: "A concise, descriptive prompt for a single visual aid (like a diagram, chart, or illustration) that would enhance this lesson. The prompt should be detailed enough for an AI image generator to create a relevant and high-quality visual. If no image is suitable, this should be an empty string."
-        };
-        // Make imagePrompt required
-        schema.properties.lessons.items.required.push("imagePrompt");
-    }
-
-    const questionSchema = {
-        type: Type.OBJECT,
-        properties: {
-            questionText: { type: Type.STRING, description: "The text of the quiz question." },
-            options: { type: Type.ARRAY, items: { type: Type.STRING }, description: "An array of 4 potential answers." },
-            correctAnswer: { type: Type.STRING, description: "The full text of the correct answer from the options list." },
-            explanation: { type: Type.STRING, description: "A brief explanation for why the answer is correct." }
-        },
-        required: ["questionText", "options", "correctAnswer", "explanation"]
-    };
-
-    const quizSchema = {
-        type: Type.OBJECT,
-        properties: {
-            title: { type: Type.STRING, description: "The title of the quiz, e.g., 'Module X Quiz'." },
-            questions: { type: Type.ARRAY, items: questionSchema, description: "A list of 3-5 multiple-choice questions to test the module's key concepts." }
-        },
-        required: ["title", "questions"]
-    };
-
-    const worksheetSchema = {
-        type: Type.OBJECT,
-        properties: {
-            title: { type: Type.STRING, description: "A title for the hands-on activity worksheet." },
-            content: { type: Type.STRING, description: "The content of the worksheet, including instructions, exercises, or problems. Formatted with markdown." }
-        },
-        required: ["title", "content"]
-    };
-    
-    const resourceSheetSchema = {
-        type: Type.OBJECT,
-        properties: {
-            title: { type: Type.STRING, description: "A title for the resource sheet." },
-            content: { type: Type.STRING, description: "A list of key terms, recommended readings, or useful links related to the module. Formatted with markdown." }
-        },
-        required: ["title", "content"]
-    };
-
-    // Add new optional properties for quiz, worksheet, and resources
-    schema.properties.quiz = { ...quizSchema, description: "A quiz to test understanding of the module content." };
-    schema.properties.worksheet = { ...worksheetSchema, description: "An optional hands-on worksheet if relevant for practical application of module concepts. If not applicable, this field should be omitted." };
-    schema.properties.resourceSheet = { ...resourceSheetSchema, description: "An optional sheet with additional resources like key terms or links. If not applicable, this field should be omitted." };
-    
-    // Make quiz required, but not worksheet or resource sheet
-    schema.required.push("quiz");
-
-    return schema;
+    required: ["title", "description", "lessons"]
 };
 
 
-async function callGeminiForJsonWithSearch(prompt: string, schema: any): Promise<{ json: any, sources: Source[] }> {
-    const fullPrompt = `${prompt}\n\nCRITICAL: You MUST respond with ONLY a valid JSON object that strictly conforms to the following schema. Do not include any other text, markdown, or explanations.
-    
-    SCHEMA:
-    ${JSON.stringify(schema, null, 2)}`;
+export async function* generateCourseStream(
+    topic: string,
+    generateImages: boolean,
+    difficulty: Difficulty,
+    courseFormat: CourseFormat
+): AsyncGenerator<GenerationUpdate> {
 
-    const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: fullPrompt,
-        config: {
-            tools: [{ googleSearch: {} }],
-        },
-    });
+    // Phase 1: Outlining
+    yield { step: GenerationStep.Outlining, message: 'Phase 1: Generating course outline...' };
 
-    const sources: Source[] = [];
-    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    for (const chunk of groundingChunks) {
-        if (chunk.web && chunk.web.uri) {
-            sources.push({ title: chunk.web.title || chunk.web.uri, url: chunk.web.uri });
-        }
-    }
-    
+    const outlinePrompt = `You are an expert instructional designer tasked with creating a course outline.
+The topic for the course is: "${topic}".
+The target audience difficulty is: "${difficulty}".
+The desired course format is: "${courseFormat}".
+
+Based on this, please generate a comprehensive course outline. The outline should include:
+1.  A compelling and SEO-friendly course title.
+2.  A concise and engaging course description.
+3.  A list of clear and measurable learning objectives.
+4.  A list of module titles that logically structure the course content.
+
+Use Google Search to find up-to-date information and ensure the outline is relevant and comprehensive.
+
+IMPORTANT: Your entire response must be ONLY a single, valid JSON object that adheres to the following TypeScript interface. Do not include any other text, markdown formatting, or explanations before or after the JSON.
+
+interface CourseOutline {
+  title: string;
+  description: string;
+  learningObjectives: string[];
+  moduleTitles: string[];
+}`;
+
+    let courseOutline: CourseOutline;
     try {
-        let jsonStr = response.text.trim();
-        if (jsonStr.startsWith("```json")) {
-            jsonStr = jsonStr.substring(7, jsonStr.length - 3).trim();
-        }
-        const json = JSON.parse(jsonStr);
-        return { json, sources };
-    } catch (e) {
-        console.error("Failed to parse JSON from Gemini response:", response.text);
-        throw new Error("AI returned invalid JSON format when using Google Search.");
-    }
-}
-
-async function generateImage(prompt: string): Promise<string> {
-    try {
-        console.log(`Generating image for prompt: ${prompt.substring(0, 100)}...`);
-        const response = await ai.models.generateImages({
-            model: 'imagen-4.0-generate-001',
-            prompt: prompt,
+        const result = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: outlinePrompt,
             config: {
-              numberOfImages: 1,
-              outputMimeType: 'image/jpeg',
+                tools: [{ googleSearch: {} }],
             },
         });
 
-        if (!response.generatedImages || response.generatedImages.length === 0) {
-            throw new Error("AI did not return any images.");
-        }
+        // Per guidelines, must extract URLs from grounding chunks.
+        const sources: Source[] = result.candidates?.[0]?.groundingMetadata?.groundingChunks
+            ?.map((chunk: any) => ({
+                title: chunk.web?.title || 'Unknown Source',
+                url: chunk.web?.uri || '',
+            }))
+            .filter((source: Source) => source.url) ?? [];
 
-        const base64ImageBytes: string = response.generatedImages[0].image.imageBytes;
-        if (!base64ImageBytes) {
-            throw new Error("Generated image data is empty.");
-        }
+        // Remove duplicate sources by URL
+        const uniqueSources = Array.from(new Map(sources.map(s => [s.url, s])).values());
         
-        return base64ImageBytes;
+        const responseText = result.text;
+        const cleanedJson = cleanJson(responseText);
+        courseOutline = JSON.parse(cleanedJson);
+        courseOutline.sources = uniqueSources;
 
-    } catch (error) {
-        console.error("Full image generation error:", error);
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to generate image. Reason: ${errorMessage}`);
+    } catch (e) {
+        console.error("Error generating course outline:", e);
+        throw new Error("Failed to generate the course outline. The model's response was invalid.");
     }
-}
 
-export async function* generateCourseStream(topic: string, includeImages: boolean, difficulty: Difficulty): AsyncGenerator<GenerationUpdate> {
-    yield { step: GenerationStep.Outlining, message: "Designing course curriculum..." };
+    yield { step: GenerationStep.Outlining, message: 'Course outline complete.', payload: courseOutline };
 
-    const outlinePrompt = `You are an expert curriculum designer. Use Google Search to find up-to-date information and create a comprehensive course outline for the topic: "${topic}". The course must be tailored for a **${difficulty}** audience. The outline must include a course title, a detailed description, 3-5 key learning objectives, and a list of 3-7 module titles designed for progressive learning.`;
-    
-    const { json: outline, sources } = await callGeminiForJsonWithSearch(outlinePrompt, outlineSchema);
-    outline.sources = sources; // Attach sources to the outline
-    yield { step: GenerationStep.Outlining, message: "Curriculum designed.", payload: outline };
+    // Phase 2: Generating Modules
+    for (let i = 0; i < courseOutline.moduleTitles.length; i++) {
+        const moduleTitle = courseOutline.moduleTitles[i];
+        yield { step: GenerationStep.GeneratingModules, message: `Phase 2: Generating module ${i + 1}/${courseOutline.moduleTitles.length}: ${moduleTitle}` };
 
-    const moduleSchema = getModuleSchema(includeImages);
-    const allModuleTitlesString = outline.moduleTitles.join('", "');
+        const modulePrompt = `You are an expert instructional designer creating content for a single module of a larger course.
 
-    for (const [index, moduleTitle] of outline.moduleTitles.entries()) {
-        yield { step: GenerationStep.GeneratingModules, message: `Generating module: "${moduleTitle}"...` };
+Course Topic: "${topic}"
+Course Description: "${courseOutline.description}"
+Course Learning Objectives: ${JSON.stringify(courseOutline.learningObjectives)}
 
-        const previousModuleTitles = outline.moduleTitles.slice(0, index);
-        const contextInstruction = previousModuleTitles.length > 0
-            ? `This module must build upon concepts from the previous modules: "${previousModuleTitles.join('", "')}". Do NOT repeat information already covered.`
-            : "This is the first module, so it should introduce the foundational concepts of the course.";
+You are now generating content for this specific module:
+Module Title: "${moduleTitle}"
 
-        let modulePrompt = `You are an expert instructional designer building a course about "${topic}" for a **${difficulty}** audience.
-The entire course is structured into these modules, in this order: "${allModuleTitlesString}".
-Your current task is to generate the content for the module titled: "${moduleTitle}".
+Based on the overall course context, please generate the complete content for this module.
+The module content must be comprehensive and align with the specified difficulty: "${difficulty}" and format: "${courseFormat}".
 
-**Primary Knowledge Base:** You MUST use Google Search to find relevant, up-to-date information to create the module and lesson content. Synthesize, expand, and structure this information into high-quality educational content.
+Your response must be a single, valid JSON object that conforms to the provided schema. The JSON object should include:
+1.  'title': The module title (should be the same as provided).
+2.  'description': A brief description of what this module covers.
+3.  'lessons': An array of lesson objects. Each lesson must have:
+    - 'title': The lesson title.
+    - 'content': The detailed lesson content in Markdown format.
+    - 'videoScript': (Optional) A short, engaging video script for the lesson.
+    - 'imagePrompt': (Optional) A simple, descriptive prompt for an AI image generator to create a relevant visual for the lesson. Focus on clear, concrete subjects and actions.
+4.  'quiz': (Optional) A quiz object with a title and an array of multiple-choice questions to test understanding of the module. Each question needs the question text, options, the correct answer, and an explanation.
+5.  'worksheet': (Optional) A worksheet object with a title and content (in Markdown) that includes practical exercises or questions for the learner.
+6.  'resourceSheet': (Optional) A resource sheet object with a title and content (in Markdown) listing further reading, links, or tools related to the module.
 
-**CRITICAL Directives:**
-1.  **Progressive Learning:** ${contextInstruction} Introduce new, more advanced topics specific to this module.
-2.  **Unique Content:** Ensure the lessons within this module are distinct, valuable, and do not regurgitate information from earlier in the course.
-3.  **Required Output:** For this module, provide a brief description and a series of detailed lessons. For each lesson, you must generate:
-    a. A lesson title.
-    b. Comprehensive lesson content (at least 250 words, formatted with markdown).
-    c. A detailed video script that corresponds to the lesson content.
-4.  **Module Quiz:** After the lessons, create a quiz with 3-5 multiple-choice questions to assess the key learning objectives of this module. Each question must have 4 options, a clearly identified correct answer, and a brief explanation for the answer.
-5.  **Value-Add Assets (Optional but Recommended):** At your expert discretion, generate the following if they add significant value to a **${difficulty}** learner for this specific module topic:
-    a. **Hands-on Worksheet:** A practical worksheet with activities, problems, or thought exercises.
-    b. **Resource Sheet:** A list of key vocabulary, external links, or recommended further reading.
-    If you determine these are not valuable for this particular module, omit them from the output.
-`;
-
-        if (includeImages) {
-             modulePrompt += `    d. A descriptive prompt for an AI to generate a relevant visual aid. If no image is needed, return an empty string for the prompt.`;
-        }
-
-        const { json: module } = await callGeminiForJsonWithSearch(modulePrompt, moduleSchema);
+Ensure all text content, especially lesson content, worksheets, and resource sheets, is formatted using Markdown for clear presentation.`;
         
-        if (includeImages) {
+        let module: Module;
+        try {
+             const result = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: modulePrompt,
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: moduleSchema,
+                }
+            });
+            const parsedJson = JSON.parse(result.text);
+            module = parsedJson as Module;
+
+        } catch (e) {
+            console.error(`Error generating module "${moduleTitle}":`, e);
+            throw new Error(`Failed to generate content for module: ${moduleTitle}.`);
+        }
+        
+
+        if (generateImages) {
             for (const lesson of module.lessons) {
-                if (lesson.imagePrompt && lesson.imagePrompt.trim() !== "") {
-                    try {
-                        yield { step: GenerationStep.GeneratingImages, message: `Creating image for: "${lesson.title}"` };
-                        const imageBase64 = await generateImage(lesson.imagePrompt);
-                        lesson.imageBase64 = imageBase64;
-                    } catch (imgErr) {
-                        console.error(`Error generating image with prompt:\n${lesson.imagePrompt}\n`, imgErr);
-                        // Continue without the image
-                    }
+                if (lesson.imagePrompt) {
+                     yield { step: GenerationStep.GeneratingImages, message: `Generating image for: ${lesson.title}` };
+                     try {
+                        const imageResult = await ai.models.generateImages({
+                            model: 'imagen-4.0-generate-001',
+                            prompt: lesson.imagePrompt,
+                            config: {
+                                numberOfImages: 1,
+                                outputMimeType: 'image/jpeg',
+                            },
+                        });
+
+                        if (imageResult.generatedImages && imageResult.generatedImages.length > 0) {
+                            lesson.imageBase64 = imageResult.generatedImages[0].image.imageBytes;
+                        }
+                     } catch (e) {
+                         console.error(`Failed to generate image for lesson "${lesson.title}":`, e);
+                         // Don't throw, just log and continue. The course can exist without images.
+                     }
                 }
             }
         }
-        
-        yield { step: GenerationStep.GeneratingModules, message: `Completed module: ${module.title}`, payload: module };
+
+        yield { step: GenerationStep.GeneratingModules, message: `Module ${i + 1} complete.`, payload: module };
     }
 }

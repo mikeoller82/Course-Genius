@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import type { Course, CourseOutline, Module } from './types';
-import { Difficulty } from './types';
+import { Difficulty, CourseFormat } from './types';
 import { generateCourseStream } from './services/geminiService';
 import TopicInput from './components/TopicInput';
 import LoadingState from './components/LoadingState';
@@ -18,6 +18,7 @@ const App: React.FC = () => {
   const [topic, setTopic] = useState<string>('');
   const [includeImages, setIncludeImages] = useState<boolean>(true);
   const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.Beginner);
+  const [courseFormat, setCourseFormat] = useState<CourseFormat>(CourseFormat.Standard);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generationLog, setGenerationLog] = useState<LogEntry[]>([]);
   const [course, setCourse] = useState<Course | null>(null);
@@ -39,7 +40,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleGenerateCourse = useCallback(async (newTopic: string, generateImages: boolean, newDifficulty: Difficulty) => {
+  const handleGenerateCourse = useCallback(async (newTopic: string, generateImages: boolean, newDifficulty: Difficulty, newFormat: CourseFormat) => {
     if (!newTopic.trim()) {
       setError('Please enter a topic.');
       return;
@@ -48,6 +49,7 @@ const App: React.FC = () => {
     setTopic(newTopic);
     setIncludeImages(generateImages);
     setDifficulty(newDifficulty);
+    setCourseFormat(newFormat);
     setIsGenerating(true);
     setCourse(null);
     setError(null);
@@ -65,7 +67,7 @@ const App: React.FC = () => {
         const log: LogEntry[] = [];
         let currentLogIndex = -1;
 
-        for await (const update of generateCourseStream(newTopic, generateImages, newDifficulty)) {
+        for await (const update of generateCourseStream(newTopic, generateImages, newDifficulty, newFormat)) {
             if (update.step === "OUTLINING") {
                 if (update.payload) { // Outline is done
                     log[currentLogIndex].isCompleted = true;
@@ -181,6 +183,8 @@ const App: React.FC = () => {
           setIncludeImages={setIncludeImages}
           difficulty={difficulty}
           setDifficulty={setDifficulty}
+          courseFormat={courseFormat}
+          setCourseFormat={setCourseFormat}
           onLoadCourse={handleLoadCourse}
           savedCourseExists={savedCourseExists}
         />

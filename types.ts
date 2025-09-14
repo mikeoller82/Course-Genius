@@ -4,6 +4,17 @@ export enum Difficulty {
   Advanced = "Advanced",
 }
 
+export enum CourseFormat {
+  Standard = "Standard Course",
+  Bootcamp = "Bootcamp (Project-Based)",
+  Asynchronous = "Asynchronous Self-Paced",
+  Synchronous = "Synchronous Live Course",
+  Email = "Email Course",
+  Podcast = "Podcast Series",
+  Workshop = "Practical Workshop",
+  Blended = "Blended Learning",
+}
+
 export interface Lesson {
   title: string;
   content: string;

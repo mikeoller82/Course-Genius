@@ -1,10 +1,10 @@
 
 import React, { useState } from 'react';
 import { SparklesIcon, LoadIcon } from './Icons';
-import { Difficulty } from '../types';
+import { Difficulty, CourseFormat } from '../types';
 
 interface TopicInputProps {
-  onSubmit: (topic: string, includeImages: boolean, difficulty: Difficulty) => void;
+  onSubmit: (topic: string, includeImages: boolean, difficulty: Difficulty, courseFormat: CourseFormat) => void;
   onLoadCourse: () => void;
   savedCourseExists: boolean;
   disabled: boolean;
@@ -12,15 +12,28 @@ interface TopicInputProps {
   setIncludeImages: (include: boolean) => void;
   difficulty: Difficulty;
   setDifficulty: (difficulty: Difficulty) => void;
+  courseFormat: CourseFormat;
+  setCourseFormat: (format: CourseFormat) => void;
 }
 
-const TopicInput: React.FC<TopicInputProps> = ({ onSubmit, disabled, includeImages, setIncludeImages, difficulty, setDifficulty, onLoadCourse, savedCourseExists }) => {
+const TopicInput: React.FC<TopicInputProps> = ({ 
+    onSubmit, 
+    disabled, 
+    includeImages, 
+    setIncludeImages, 
+    difficulty, 
+    setDifficulty, 
+    courseFormat,
+    setCourseFormat,
+    onLoadCourse, 
+    savedCourseExists 
+}) => {
   const [topic, setTopic] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (topic.trim() && !disabled) {
-      onSubmit(topic, includeImages, difficulty);
+      onSubmit(topic, includeImages, difficulty, courseFormat);
     }
   };
 
@@ -35,24 +48,39 @@ const TopicInput: React.FC<TopicInputProps> = ({ onSubmit, disabled, includeImag
         disabled={disabled}
       />
 
-      <div className="w-full flex flex-col items-center gap-4">
-        <div className="flex flex-col sm:flex-row justify-center items-center gap-x-6 gap-y-3 text-slate-400">
-          <span className="font-semibold text-slate-300">Difficulty:</span>
-          {Object.values(Difficulty).map((level) => (
-            <label key={level} className="flex items-center gap-2 cursor-pointer hover:text-slate-200">
-              <input
-                type="radio"
-                name="difficulty"
-                value={level}
-                checked={difficulty === level}
-                onChange={() => setDifficulty(level)}
+      <div className="w-full flex flex-col md:flex-row items-center justify-center gap-4 text-slate-400">
+          <div className="flex flex-col sm:flex-row justify-center items-center gap-x-6 gap-y-3">
+            <span className="font-semibold text-slate-300">Difficulty:</span>
+            {Object.values(Difficulty).map((level) => (
+              <label key={level} className="flex items-center gap-2 cursor-pointer hover:text-slate-200">
+                <input
+                  type="radio"
+                  name="difficulty"
+                  value={level}
+                  checked={difficulty === level}
+                  onChange={() => setDifficulty(level)}
+                  disabled={disabled}
+                  className="w-4 h-4 text-sky-500 bg-slate-700 border-slate-600 focus:ring-sky-600 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                {level}
+              </label>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label htmlFor="course-format" className="font-semibold text-slate-300">Format:</label>
+            <select
+                id="course-format"
+                value={courseFormat}
+                onChange={(e) => setCourseFormat(e.target.value as CourseFormat)}
                 disabled={disabled}
-                className="w-4 h-4 text-sky-500 bg-slate-700 border-slate-600 focus:ring-sky-600 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-              />
-              {level}
-            </label>
-          ))}
-        </div>
+                className="bg-slate-800 border border-slate-700 rounded-md p-2 text-slate-300 focus:ring-2 focus:ring-sky-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            >
+                {Object.values(CourseFormat).map(format => (
+                    <option key={format} value={format}>{format}</option>
+                ))}
+            </select>
+          </div>
       </div>
 
       <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full mt-2">
