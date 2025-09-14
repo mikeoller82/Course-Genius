@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import type { CourseOutline, Module, Difficulty, CourseFormat, GenerationUpdate, Source } from '../types';
 import { GenerationStep } from '../types';
 
@@ -191,17 +191,23 @@ Ensure all text content, especially lesson content, worksheets, and resource she
                 if (lesson.imagePrompt) {
                      yield { step: GenerationStep.GeneratingImages, message: `Generating image for: ${lesson.title}` };
                      try {
-                        const imageResult = await ai.models.generateImages({
-                            model: 'imagen-4.0-generate-001',
-                            prompt: lesson.imagePrompt,
+                        const imageResult = await ai.models.generateContent({
+                            model: 'gemini-2.5-flash-image-preview',
+                            contents: {
+                                parts: [{ text: lesson.imagePrompt }],
+                            },
                             config: {
-                                numberOfImages: 1,
-                                outputMimeType: 'image/jpeg',
+                                responseModalities: [Modality.IMAGE, Modality.TEXT],
                             },
                         });
 
-                        if (imageResult.generatedImages && imageResult.generatedImages.length > 0) {
-                            lesson.imageBase64 = imageResult.generatedImages[0].image.imageBytes;
+                        if (imageResult.candidates && imageResult.candidates.length > 0) {
+                            for (const part of imageResult.candidates[0].content.parts) {
+                                if (part.inlineData) {
+                                    lesson.imageBase64 = part.inlineData.data;
+                                    break; // Found an image, stop looking.
+                                }
+                            }
                         }
                      } catch (e) {
                          console.error(`Failed to generate image for lesson "${lesson.title}":`, e);
