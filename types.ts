@@ -66,7 +66,6 @@ export interface CourseOutline {
 
 export enum GenerationStep {
   Idle = "IDLE",
-  RESEARCHING = "RESEARCHING",
   Outlining = "OUTLINING",
   GeneratingModules = "GENERATING_MODULES",
   GeneratingImages = "GENERATING_IMAGES",

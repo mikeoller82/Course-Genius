@@ -1,7 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import type { Course, CourseOutline, Module, GenerationUpdate, Lesson } from '../types';
+import type { CourseOutline, Module, GenerationUpdate, Lesson, Source } from '../types';
 import { GenerationStep, Difficulty } from '../types';
-import { researchTopic } from "./firecrawlService";
 
 if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set");
@@ -118,22 +117,38 @@ const getModuleSchema = (includeImages: boolean) => {
 };
 
 
-async function callGeminiWithSchema(prompt: string, schema: any): Promise<any> {
+async function callGeminiForJsonWithSearch(prompt: string, schema: any): Promise<{ json: any, sources: Source[] }> {
+    const fullPrompt = `${prompt}\n\nCRITICAL: You MUST respond with ONLY a valid JSON object that strictly conforms to the following schema. Do not include any other text, markdown, or explanations.
+    
+    SCHEMA:
+    ${JSON.stringify(schema, null, 2)}`;
+
     const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: prompt,
+        contents: fullPrompt,
         config: {
-            responseMimeType: "application/json",
-            responseSchema: schema,
+            tools: [{ googleSearch: {} }],
         },
     });
 
+    const sources: Source[] = [];
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    for (const chunk of groundingChunks) {
+        if (chunk.web && chunk.web.uri) {
+            sources.push({ title: chunk.web.title || chunk.web.uri, url: chunk.web.uri });
+        }
+    }
+    
     try {
         let jsonStr = response.text.trim();
-        return JSON.parse(jsonStr);
+        if (jsonStr.startsWith("```json")) {
+            jsonStr = jsonStr.substring(7, jsonStr.length - 3).trim();
+        }
+        const json = JSON.parse(jsonStr);
+        return { json, sources };
     } catch (e) {
-        console.error("Failed to parse JSON:", response.text);
-        throw new Error("AI returned invalid JSON format.");
+        console.error("Failed to parse JSON from Gemini response:", response.text);
+        throw new Error("AI returned invalid JSON format when using Google Search.");
     }
 }
 
@@ -168,20 +183,11 @@ async function generateImage(prompt: string): Promise<string> {
 }
 
 export async function* generateCourseStream(topic: string, includeImages: boolean, difficulty: Difficulty): AsyncGenerator<GenerationUpdate> {
-    yield { step: GenerationStep.RESEARCHING, message: "Researching topic with Firecrawl..." };
-    const { researchContent, sources } = await researchTopic(topic);
-    yield { step: GenerationStep.RESEARCHING, message: "Research complete.", payload: { sources } };
-    
     yield { step: GenerationStep.Outlining, message: "Designing course curriculum..." };
 
-    const outlinePrompt = `You are an expert curriculum designer. Based *primarily* on the following up-to-date research material, create a comprehensive course outline for the topic: "${topic}". The course must be tailored for a **${difficulty}** audience. The outline must include a course title, a detailed description, 3-5 key learning objectives, and a list of 3-7 module titles designed for progressive learning.
-
-    **Research Material:**
-    ---
-    ${researchContent}
-    ---
-    `;
-    const outline: CourseOutline = await callGeminiWithSchema(outlinePrompt, outlineSchema);
+    const outlinePrompt = `You are an expert curriculum designer. Use Google Search to find up-to-date information and create a comprehensive course outline for the topic: "${topic}". The course must be tailored for a **${difficulty}** audience. The outline must include a course title, a detailed description, 3-5 key learning objectives, and a list of 3-7 module titles designed for progressive learning.`;
+    
+    const { json: outline, sources } = await callGeminiForJsonWithSearch(outlinePrompt, outlineSchema);
     outline.sources = sources; // Attach sources to the outline
     yield { step: GenerationStep.Outlining, message: "Curriculum designed.", payload: outline };
 
@@ -200,13 +206,10 @@ export async function* generateCourseStream(topic: string, includeImages: boolea
 The entire course is structured into these modules, in this order: "${allModuleTitlesString}".
 Your current task is to generate the content for the module titled: "${moduleTitle}".
 
-**Primary Knowledge Base:** You MUST base the module and lesson content on the research material provided below. Synthesize, expand, and structure this information into high-quality educational content. Do not introduce topics not covered in the research.
----
-${researchContent}
----
+**Primary Knowledge Base:** You MUST use Google Search to find relevant, up-to-date information to create the module and lesson content. Synthesize, expand, and structure this information into high-quality educational content.
 
 **CRITICAL Directives:**
-1.  **Progressive Learning:** ${contextInstruction} Introduce new, more advanced topics specific to this module, drawing from the provided research.
+1.  **Progressive Learning:** ${contextInstruction} Introduce new, more advanced topics specific to this module.
 2.  **Unique Content:** Ensure the lessons within this module are distinct, valuable, and do not regurgitate information from earlier in the course.
 3.  **Required Output:** For this module, provide a brief description and a series of detailed lessons. For each lesson, you must generate:
     a. A lesson title.
@@ -223,7 +226,7 @@ ${researchContent}
              modulePrompt += `    d. A descriptive prompt for an AI to generate a relevant visual aid. If no image is needed, return an empty string for the prompt.`;
         }
 
-        const module: Module = await callGeminiWithSchema(modulePrompt, moduleSchema);
+        const { json: module } = await callGeminiForJsonWithSearch(modulePrompt, moduleSchema);
         
         if (includeImages) {
             for (const lesson of module.lessons) {
