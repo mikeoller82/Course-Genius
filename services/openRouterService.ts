@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import type { CourseOutline, Module, Difficulty, CourseFormat, GenerationUpdate, ModelConfig, ModelInfo, Source } from '../types';
+import type { CourseOutline, Module, Difficulty, CourseFormat, GenerationUpdate, ModelConfig, ModelInfo } from '../types';
 import { GenerationStep, ModelProvider } from '../types';
 import type { AIService } from './aiService';
 
@@ -430,15 +430,23 @@ IMPORTANT: Your response must be ONLY a single, valid JSON object. Follow these 
 4. Do not include trailing commas
 5. Do not include any markdown formatting, explanations, or other text outside the JSON
 
-The JSON must include:
-1. 'title': The module title (same as provided)
-2. 'description': Brief description of module coverage
-3. 'lessons': Array of lesson objects with title, content (Markdown), optional videoScript and imagePrompt
-4. 'quiz': Optional quiz object with title and multiple-choice questions
-5. 'worksheet': Optional worksheet with practical exercises (Markdown)
-6. 'resourceSheet': Optional resource sheet with additional materials (Markdown)
+The JSON object should include:
+1. 'title': The module title (should be the same as provided)
+2. 'description': A brief description of what this module covers
+3. 'lessons': An array of lesson objects. Each lesson must have:
+   - 'title': The lesson title
+   - 'content': The detailed lesson content in Markdown format (minimum 500 words)
+   - 'videoScript': (Optional but encouraged) A short, engaging video script for the lesson that could be used for video creation. Should be conversational and educational.
+   - 'imagePrompt': (Optional) A simple, descriptive prompt for an AI image generator to create a relevant visual for the lesson. Focus on clear, concrete subjects and actions.
+4. 'quiz': (Optional but encouraged) A quiz object with a title and an array of multiple-choice questions to test understanding of the module. Each question needs:
+   - 'questionText': The question text
+   - 'options': Array of possible answers
+   - 'correctAnswer': The correct answer (must match one of the options exactly)
+   - 'explanation': An explanation of why this is the correct answer
+5. 'worksheet': (Optional but encouraged) A worksheet object with a title and content (in Markdown) that includes practical exercises, assignments, or hands-on activities for the learner to apply what they've learned.
+6. 'resourceSheet': (Optional but encouraged) A resource sheet object with a title and content (in Markdown) listing further reading, useful links, tools, or additional materials related to the module.
 
-Ensure lesson content is comprehensive (minimum 500 words) and properly formatted in Markdown.`;
+Ensure all text content, especially lesson content, worksheets, and resource sheets, is formatted using Markdown for clear presentation. Video scripts should be engaging and suitable for educational content creation.`;
 
       let module: Module;
       try {
