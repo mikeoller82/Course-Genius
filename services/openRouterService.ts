@@ -185,6 +185,36 @@ export class OpenRouterService implements AIService {
     }
   }
 
+  private async sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private async retryApiCall<T>(
+    operation: (attempt: number) => Promise<T>,
+    context: string,
+    maxRetries: number = 3,
+    baseDelay: number = 1000
+  ): Promise<T> {
+    let lastError: Error;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation(attempt);
+      } catch (error) {
+        lastError = error as Error;
+        console.warn(`Attempt ${attempt}/${maxRetries} failed for ${context}:`, error);
+
+        if (attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+          console.log(`Retrying ${context} in ${delay}ms...`);
+          await this.sleep(delay);
+        }
+      }
+    }
+
+    throw lastError!;
+  }
+
   async* generateCourseStream(
     topic: string,
     generateImages: boolean,
@@ -224,35 +254,49 @@ interface CourseOutline {
 
     let courseOutline: CourseOutline;
     try {
-      const completion = await this.client.chat.completions.create({
-        model: modelConfig.model,
-        messages: [{ role: 'user', content: outlinePrompt }],
-        temperature: 0.7,
-        max_tokens: 2000,
-      });
+      courseOutline = await this.retryApiCall(
+        async (attempt: number) => {
+          // Slightly reduce token limit on retries for outline too
+          const tokenLimit = attempt === 1 ? 2000 : Math.max(1500, 2000 - (attempt - 1) * 250);
+          console.log(`Attempt ${attempt} for course outline with ${tokenLimit} token limit`);
 
-      const responseText = completion.choices[0]?.message?.content || '';
+          const completion = await this.client.chat.completions.create({
+            model: modelConfig.model,
+            messages: [{ role: 'user', content: outlinePrompt }],
+            temperature: 0.7,
+            max_tokens: tokenLimit,
+          });
 
-      // Log response for debugging
-      console.log('OpenRouter API Response for course outline:', {
-        model: modelConfig.model,
-        responseLength: responseText.length,
-        response: responseText.substring(0, 200) + '...',
-        fullCompletion: completion
-      });
+          const responseText = completion.choices[0]?.message?.content || '';
 
-      if (!responseText || responseText.trim().length === 0) {
-        throw new Error(`OpenRouter model "${modelConfig.model}" returned an empty response. This might be due to API limits or model availability.`);
-      }
+          // Log response for debugging
+          console.log('OpenRouter API Response for course outline:', {
+            model: modelConfig.model,
+            attempt: attempt,
+            responseLength: responseText.length,
+            tokenLimit: tokenLimit,
+            response: responseText.substring(0, 200) + '...',
+          });
 
-      courseOutline = this.safeJsonParse<CourseOutline>(responseText, 'course outline generation');
+          if (!responseText || responseText.trim().length === 0) {
+            throw new Error(`OpenRouter model "${modelConfig.model}" returned an empty response on attempt ${attempt}. This might be due to API limits or model availability.`);
+          }
 
-      // OpenRouter doesn't have search grounding, so no sources
-      courseOutline.sources = [];
+          const result = this.safeJsonParse<CourseOutline>(responseText, `course outline generation (attempt ${attempt})`);
+
+          // OpenRouter doesn't have search grounding, so no sources
+          result.sources = [];
+
+          return result;
+        },
+        'course outline generation',
+        3, // maxRetries
+        1000 // baseDelay - 1 second
+      );
 
     } catch (error) {
-      console.error('Error generating course outline:', error);
-      throw new Error('Failed to generate the course outline. The model response was invalid.');
+      console.error('Error generating course outline after all retries:', error);
+      throw new Error('Failed to generate the course outline after 3 attempts. The model response was invalid.');
     }
 
     yield { step: GenerationStep.Outlining, message: 'Course outline complete.', payload: courseOutline };
@@ -296,19 +340,42 @@ Ensure lesson content is comprehensive (minimum 500 words) and properly formatte
 
       let module: Module;
       try {
-        const completion = await this.client.chat.completions.create({
-          model: modelConfig.model,
-          messages: [{ role: 'user', content: modulePrompt }],
-          temperature: 0.7,
-          max_tokens: 4000,
-        });
+        module = await this.retryApiCall(
+          async (attempt: number) => {
+            // Reduce token limit on retries to avoid truncation
+            const tokenLimit = attempt === 1 ? 4000 : Math.max(2000, 4000 - (attempt - 1) * 1000);
+            console.log(`Attempt ${attempt} for module "${moduleTitle}" with ${tokenLimit} token limit`);
 
-        const responseText = completion.choices[0]?.message?.content || '';
-        module = this.safeJsonParse<Module>(responseText, `module "${moduleTitle}" generation`);
+            const completion = await this.client.chat.completions.create({
+              model: modelConfig.model,
+              messages: [{ role: 'user', content: modulePrompt }],
+              temperature: 0.7,
+              max_tokens: tokenLimit,
+            });
+
+            const responseText = completion.choices[0]?.message?.content || '';
+
+            if (!responseText || responseText.trim().length === 0) {
+              throw new Error(`Empty response from model on attempt ${attempt}`);
+            }
+
+            // Log response details for debugging
+            console.log(`Module "${moduleTitle}" attempt ${attempt} response:`, {
+              responseLength: responseText.length,
+              tokenLimit: tokenLimit,
+              truncated: responseText.length >= tokenLimit * 0.9, // Likely truncated if very close to limit
+            });
+
+            return this.safeJsonParse<Module>(responseText, `module "${moduleTitle}" generation (attempt ${attempt})`);
+          },
+          `module "${moduleTitle}" generation`,
+          3, // maxRetries
+          2000 // baseDelay - 2 seconds
+        );
 
       } catch (error) {
-        console.error(`Error generating module "${moduleTitle}":`, error);
-        throw new Error(`Failed to generate content for module: ${moduleTitle}.`);
+        console.error(`Error generating module "${moduleTitle}" after all retries:`, error);
+        throw new Error(`Failed to generate content for module: ${moduleTitle} after 3 attempts.`);
       }
 
       // Note: OpenRouter doesn't support image generation like Gemini
