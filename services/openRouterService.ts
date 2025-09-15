@@ -30,37 +30,29 @@ export class OpenRouterService implements AIService {
   private getMaxOutputTokens(modelId: string, contextLength: number): number {
     // Model-specific max output token limits based on research
     const modelLimits: { [key: string]: number } = {
-      // Claude models
-      'anthropic/claude-3.5-sonnet': 8192,
-      'anthropic/claude-3-sonnet': 4096,
-      'anthropic/claude-3-haiku': 4096,
-      'anthropic/claude-3-opus': 4096,
-      'anthropic/claude-opus-4.1': 32000,
+      // Qwen models
+      'qwen/qwen3-coder:free': 262000,
+      'qwen/qwen3-235b-a22b:free': 131000,
+
+      // Other popular models
+      'openrouter/sonoma-dusk-alpha': 2000000,
+      'openrouter/sonoma-sky-alpha': 2000000,
+      'nvidia/nemotron-nano-9b-v2:free': 128000,
 
       // OpenAI models
-      'openai/gpt-4o': 16384,
-      'openai/gpt-4o-mini': 16384,
-      'openai/gpt-4-turbo': 4096,
-      'openai/gpt-4': 8192,
-      'openai/gpt-5': 128000,
-
-      // Google models
-      'google/gemini-pro-1.5': 65535,
-      'google/gemini-2.5-flash-lite': 65535,
-      'google/gemini-exp-1121': 65535,
+      'openai/gpt-oss-120b:free': 131000,
 
       // Meta models
-      'meta-llama/llama-3.1-405b': 32768,
-      'meta-llama/llama-3.1-70b': 32768,
-      'meta-llama/llama-3.1-8b': 32768,
+      'meta-llama/llama-4-maverick:free': 4000,
+      'meta-llama/llama-4-scout:free': 4000,
 
       // Mistral models
-      'mistralai/mistral-large': 32768,
-      'mistralai/codestral-2508': 32768,
+      'mistralai/mistral-small-3.2-24b-instruct:free': 131000,
 
-      // Other models
-      'qwen/qwen-3-next-80b': 32768,
-      'deepseek/deepseek-chat': 16384,
+      // Deepseek models
+      'tngtech/deepseek-r1t2-chimera:free': 163000,
+      'deepseek/deepseek-chat-v3.1:free': 163000,
+      'deepseek/deepseek-r1-0528:free': 163000,
     };
 
     // Check for exact match first
@@ -145,7 +137,7 @@ export class OpenRouterService implements AIService {
           supportsStreaming: true,
         },
         {
-          id: 'google/gemini-pro-1.5',
+          id: 'google/gemini-pro-2.5',
           name: 'Gemini Pro 1.5',
           provider: ModelProvider.OpenRouter,
           contextLength: 1000000,
