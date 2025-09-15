@@ -7,9 +7,17 @@ export class OpenRouterService implements AIService {
   private client: OpenAI;
 
   constructor() {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+
+    if (!apiKey) {
+      console.warn('OpenRouter API key not found. OpenRouter models may not work properly.');
+    } else {
+      console.log('OpenRouter API key loaded:', apiKey.substring(0, 10) + '...');
+    }
+
     this.client = new OpenAI({
       baseURL: 'https://openrouter.ai/api/v1',
-      apiKey: process.env.OPENROUTER_API_KEY,
+      apiKey: apiKey,
       dangerouslyAllowBrowser: true, // Required for client-side usage
       defaultHeaders: {
         'HTTP-Referer': window.location.origin,
@@ -84,19 +92,97 @@ export class OpenRouterService implements AIService {
   }
 
   private cleanJson(text: string): string {
-    // Extract JSON from markdown code blocks or plain text
+    // First, try to extract JSON from markdown code blocks
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) {
-      return match[1].trim();
+      text = match[1].trim();
     }
 
-    // Try to extract JSON object from text
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return jsonMatch[0];
+    // Try to find the first valid JSON object
+    let startIndex = text.indexOf('{');
+    if (startIndex === -1) {
+      return text.trim();
+    }
+
+    // Find the matching closing brace
+    let braceCount = 0;
+    let endIndex = -1;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = startIndex; i < text.length; i++) {
+      const char = text[i];
+
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+
+      if (!inString) {
+        if (char === '{') {
+          braceCount++;
+        } else if (char === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            endIndex = i;
+            break;
+          }
+        }
+      }
+    }
+
+    if (endIndex !== -1) {
+      const jsonStr = text.substring(startIndex, endIndex + 1);
+
+      // Try to fix common JSON issues
+      let cleaned = jsonStr
+        // Fix trailing commas
+        .replace(/,(\s*[}\]])/g, '$1')
+        // Fix unescaped quotes in strings (basic attempt)
+        .replace(/([^\\])"([^",:}\]]+)"([^",:}\]]+)"/g, '$1"$2\\"$3"')
+        // Remove any trailing text after the JSON
+        .trim();
+
+      return cleaned;
     }
 
     return text.trim();
+  }
+
+  private safeJsonParse<T>(text: string, context: string): T {
+    try {
+      const cleanedJson = this.cleanJson(text);
+      return JSON.parse(cleanedJson);
+    } catch (error) {
+      console.error(`JSON parsing error in ${context}:`, error);
+      console.error(`Raw response text:`, text.substring(0, 1000) + '...');
+      console.error(`Cleaned JSON:`, this.cleanJson(text).substring(0, 1000) + '...');
+
+      // Try a more aggressive cleaning approach
+      try {
+        const aggressiveClean = text
+          .replace(/```json\s*/g, '')
+          .replace(/```\s*/g, '')
+          .replace(/^[^{]*({.*})[^}]*$/s, '$1')
+          .replace(/,(\s*[}\]])/g, '$1')
+          .replace(/(['"])\s*:\s*(['"][^'"]*)\n([^'"]*['"])/g, '$1: $2$3')
+          .trim();
+
+        return JSON.parse(aggressiveClean);
+      } catch (secondError) {
+        throw new Error(`Failed to parse JSON response in ${context}. The AI model may have generated invalid JSON format.`);
+      }
+    }
   }
 
   async* generateCourseStream(
@@ -121,8 +207,14 @@ Based on this, please generate a comprehensive course outline. The outline shoul
 3. A list of clear and measurable learning objectives.
 4. A list of module titles that logically structure the course content.
 
-IMPORTANT: Your entire response must be ONLY a single, valid JSON object that adheres to the following TypeScript interface. Do not include any other text, markdown formatting, or explanations before or after the JSON.
+IMPORTANT: Your entire response must be ONLY a single, valid JSON object. Follow these strict formatting rules:
+1. Start your response with { and end with }
+2. Use double quotes for all strings
+3. Escape any quotes within strings with \"
+4. Do not include trailing commas
+5. Do not include any markdown formatting, explanations, or other text
 
+The JSON must adhere to this TypeScript interface:
 interface CourseOutline {
   title: string;
   description: string;
@@ -140,8 +232,20 @@ interface CourseOutline {
       });
 
       const responseText = completion.choices[0]?.message?.content || '';
-      const cleanedJson = this.cleanJson(responseText);
-      courseOutline = JSON.parse(cleanedJson);
+
+      // Log response for debugging
+      console.log('OpenRouter API Response for course outline:', {
+        model: modelConfig.model,
+        responseLength: responseText.length,
+        response: responseText.substring(0, 200) + '...',
+        fullCompletion: completion
+      });
+
+      if (!responseText || responseText.trim().length === 0) {
+        throw new Error(`OpenRouter model "${modelConfig.model}" returned an empty response. This might be due to API limits or model availability.`);
+      }
+
+      courseOutline = this.safeJsonParse<CourseOutline>(responseText, 'course outline generation');
 
       // OpenRouter doesn't have search grounding, so no sources
       courseOutline.sources = [];
@@ -173,19 +277,22 @@ Module Title: "${moduleTitle}"
 Based on the overall course context, please generate the complete content for this module.
 The module content must be comprehensive and align with the specified difficulty: "${difficulty}" and format: "${courseFormat}".
 
-Your response must be a single, valid JSON object that includes:
-1. 'title': The module title (should be the same as provided).
-2. 'description': A brief description of what this module covers.
-3. 'lessons': An array of lesson objects. Each lesson must have:
-   - 'title': The lesson title.
-   - 'content': The detailed lesson content in Markdown format (minimum 500 words).
-   - 'videoScript': (Optional) A short, engaging video script for the lesson.
-   - 'imagePrompt': (Optional) A simple, descriptive prompt for an AI image generator.
-4. 'quiz': (Optional) A quiz object with a title and an array of multiple-choice questions.
-5. 'worksheet': (Optional) A worksheet object with practical exercises in Markdown.
-6. 'resourceSheet': (Optional) A resource sheet with additional learning materials in Markdown.
+IMPORTANT: Your response must be ONLY a single, valid JSON object. Follow these strict formatting rules:
+1. Start your response with { and end with }
+2. Use double quotes for all strings
+3. Escape any quotes within strings with \"
+4. Do not include trailing commas
+5. Do not include any markdown formatting, explanations, or other text outside the JSON
 
-Ensure all content is formatted using Markdown for clear presentation.`;
+The JSON must include:
+1. 'title': The module title (same as provided)
+2. 'description': Brief description of module coverage
+3. 'lessons': Array of lesson objects with title, content (Markdown), optional videoScript and imagePrompt
+4. 'quiz': Optional quiz object with title and multiple-choice questions
+5. 'worksheet': Optional worksheet with practical exercises (Markdown)
+6. 'resourceSheet': Optional resource sheet with additional materials (Markdown)
+
+Ensure lesson content is comprehensive (minimum 500 words) and properly formatted in Markdown.`;
 
       let module: Module;
       try {
@@ -197,8 +304,7 @@ Ensure all content is formatted using Markdown for clear presentation.`;
         });
 
         const responseText = completion.choices[0]?.message?.content || '';
-        const cleanedJson = this.cleanJson(responseText);
-        module = JSON.parse(cleanedJson);
+        module = this.safeJsonParse<Module>(responseText, `module "${moduleTitle}" generation`);
 
       } catch (error) {
         console.error(`Error generating module "${moduleTitle}":`, error);
