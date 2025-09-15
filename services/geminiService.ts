@@ -11,13 +11,14 @@ export class GeminiService implements AIService {
   }
 
   async getAvailableModels(): Promise<ModelInfo[]> {
-    // Return Gemini models
+    // Return Gemini models with proper max output tokens
     return [
       {
         id: 'gemini-2.5-flash',
         name: 'Gemini 2.5 Flash',
         provider: ModelProvider.Gemini,
         contextLength: 128000,
+        maxOutputTokens: 32768,
         supportsImages: true,
         supportsStreaming: true,
       },
@@ -26,6 +27,7 @@ export class GeminiService implements AIService {
         name: 'Gemini 2.5 Flash (Image Generation)',
         provider: ModelProvider.Gemini,
         contextLength: 128000,
+        maxOutputTokens: 32768,
         supportsImages: true,
         supportsStreaming: true,
       }

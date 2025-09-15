@@ -99,6 +99,7 @@ export interface ModelInfo {
   name: string;
   provider: ModelProvider;
   contextLength?: number;
+  maxOutputTokens?: number;
   supportsImages?: boolean;
   supportsStreaming?: boolean;
   cost?: {
