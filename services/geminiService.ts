@@ -1,11 +1,46 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import type { CourseOutline, Module, Difficulty, CourseFormat, GenerationUpdate, Source } from '../types';
-import { GenerationStep } from '../types';
+import type { CourseOutline, Module, Difficulty, CourseFormat, GenerationUpdate, Source, ModelConfig, ModelInfo } from '../types';
+import { GenerationStep, ModelProvider } from '../types';
+import type { AIService } from './aiService';
 
-// Per instructions, API key is handled by the environment.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export class GeminiService implements AIService {
+  private ai: GoogleGenAI;
 
-const cleanJson = (text: string): string => {
+  constructor() {
+    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  }
+
+  async getAvailableModels(): Promise<ModelInfo[]> {
+    // Return Gemini models
+    return [
+      {
+        id: 'gemini-2.5-flash',
+        name: 'Gemini 2.5 Flash',
+        provider: ModelProvider.Gemini,
+        contextLength: 128000,
+        supportsImages: true,
+        supportsStreaming: true,
+      },
+      {
+        id: 'gemini-2.5-flash-image-preview',
+        name: 'Gemini 2.5 Flash (Image Generation)',
+        provider: ModelProvider.Gemini,
+        contextLength: 128000,
+        supportsImages: true,
+        supportsStreaming: true,
+      }
+    ];
+  }
+
+  supportsImages(): boolean {
+    return true;
+  }
+
+  supportsSearch(): boolean {
+    return true;
+  }
+
+  private cleanJson(text: string): string {
     // Attempts to extract a valid JSON object from a string that might be wrapped in markdown.
     const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (match && match[1]) {
@@ -13,9 +48,9 @@ const cleanJson = (text: string): string => {
     }
     // Fallback for cases where there are no markdown backticks
     return text.trim();
-};
+  }
 
-const moduleSchema = {
+  private moduleSchema = {
     type: Type.OBJECT,
     properties: {
         title: { type: Type.STRING },
@@ -68,15 +103,15 @@ const moduleSchema = {
         }
     },
     required: ["title", "description", "lessons"]
-};
+  };
 
-
-export async function* generateCourseStream(
+  async* generateCourseStream(
     topic: string,
     generateImages: boolean,
     difficulty: Difficulty,
-    courseFormat: CourseFormat
-): AsyncGenerator<GenerationUpdate> {
+    courseFormat: CourseFormat,
+    modelConfig: ModelConfig
+  ): AsyncGenerator<GenerationUpdate> {
 
     // Phase 1: Outlining
     yield { step: GenerationStep.Outlining, message: 'Phase 1: Generating course outline...' };
@@ -105,8 +140,8 @@ interface CourseOutline {
 
     let courseOutline: CourseOutline;
     try {
-        const result = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+        const result = await this.ai.models.generateContent({
+            model: modelConfig.model,
             contents: outlinePrompt,
             config: {
                 tools: [{ googleSearch: {} }],
@@ -125,7 +160,7 @@ interface CourseOutline {
         const uniqueSources = Array.from(new Map(sources.map(s => [s.url, s])).values());
         
         const responseText = result.text;
-        const cleanedJson = cleanJson(responseText);
+        const cleanedJson = this.cleanJson(responseText);
         courseOutline = JSON.parse(cleanedJson);
         courseOutline.sources = uniqueSources;
 
@@ -169,12 +204,12 @@ Ensure all text content, especially lesson content, worksheets, and resource she
         
         let module: Module;
         try {
-             const result = await ai.models.generateContent({
-                model: "gemini-2.5-flash",
+             const result = await this.ai.models.generateContent({
+                model: modelConfig.model,
                 contents: modulePrompt,
                 config: {
                     responseMimeType: "application/json",
-                    responseSchema: moduleSchema,
+                    responseSchema: this.moduleSchema,
                 }
             });
             const parsedJson = JSON.parse(result.text);
@@ -191,7 +226,7 @@ Ensure all text content, especially lesson content, worksheets, and resource she
                 if (lesson.imagePrompt) {
                      yield { step: GenerationStep.GeneratingImages, message: `Generating image for: ${lesson.title}` };
                      try {
-                        const imageResult = await ai.models.generateContent({
+                        const imageResult = await this.ai.models.generateContent({
                             model: 'gemini-2.5-flash-image-preview',
                             contents: {
                                 parts: [{ text: lesson.imagePrompt }],
@@ -219,4 +254,23 @@ Ensure all text content, especially lesson content, worksheets, and resource she
 
         yield { step: GenerationStep.GeneratingModules, message: `Module ${i + 1} complete.`, payload: module };
     }
+  }
+}
+
+// Legacy function for backwards compatibility
+export async function* generateCourseStream(
+    topic: string,
+    generateImages: boolean,
+    difficulty: Difficulty,
+    courseFormat: CourseFormat
+): AsyncGenerator<GenerationUpdate> {
+  const service = new GeminiService();
+  const modelConfig = {
+    provider: ModelProvider.Gemini,
+    model: 'gemini-2.5-flash',
+    supportsImages: true,
+    supportsSearch: true
+  };
+
+  yield* service.generateCourseStream(topic, generateImages, difficulty, courseFormat, modelConfig);
 }

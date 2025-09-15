@@ -4,6 +4,11 @@ export enum Difficulty {
   Advanced = "Advanced",
 }
 
+export enum ModelProvider {
+  Gemini = "gemini",
+  OpenRouter = "openrouter",
+}
+
 export enum CourseFormat {
   Standard = "Standard Course",
   Bootcamp = "Bootcamp (Project-Based)",
@@ -87,4 +92,24 @@ export interface GenerationUpdate {
     step: GenerationStep;
     message: string;
     payload?: any;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  provider: ModelProvider;
+  contextLength?: number;
+  supportsImages?: boolean;
+  supportsStreaming?: boolean;
+  cost?: {
+    input: number;
+    output: number;
+  };
+}
+
+export interface ModelConfig {
+  provider: ModelProvider;
+  model: string;
+  supportsImages: boolean;
+  supportsSearch: boolean;
 }

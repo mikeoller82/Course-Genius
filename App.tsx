@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import type { Course, CourseOutline, Module } from './types';
-import { Difficulty, CourseFormat } from './types';
-import { generateCourseStream } from './services/geminiService';
+import type { Course, CourseOutline, Module, ModelInfo, ModelConfig } from './types';
+import { Difficulty, CourseFormat, ModelProvider } from './types';
+import { createAIService } from './services/aiService';
 import TopicInput from './components/TopicInput';
 import LoadingState from './components/LoadingState';
 import CourseDisplay from './components/CourseDisplay';
@@ -25,6 +25,17 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [savedCourseExists, setSavedCourseExists] = useState<boolean>(false);
 
+  // Model selection state
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [selectedModel, setSelectedModel] = useState<ModelInfo>({
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    provider: ModelProvider.Gemini,
+    contextLength: 128000,
+    supportsImages: true,
+    supportsStreaming: true,
+  });
+
   // State for progress calculation
   const [totalModules, setTotalModules] = useState(0);
   const [completedModules, setCompletedModules] = useState(0);
@@ -40,16 +51,56 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleGenerateCourse = useCallback(async (newTopic: string, generateImages: boolean, newDifficulty: Difficulty, newFormat: CourseFormat) => {
+  // Load available models from all providers
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        const allModels: ModelInfo[] = [];
+
+        // Load Gemini models
+        try {
+          const geminiService = await createAIService('gemini');
+          const geminiModels = await geminiService.getAvailableModels();
+          allModels.push(...geminiModels);
+        } catch (e) {
+          console.warn('Failed to load Gemini models:', e);
+        }
+
+        // Load OpenRouter models
+        try {
+          const openRouterService = await createAIService('openrouter');
+          const openRouterModels = await openRouterService.getAvailableModels();
+          allModels.push(...openRouterModels);
+        } catch (e) {
+          console.warn('Failed to load OpenRouter models:', e);
+        }
+
+        setAvailableModels(allModels);
+
+        // If no models loaded, fallback to default Gemini model
+        if (allModels.length === 0) {
+          setAvailableModels([selectedModel]);
+        }
+      } catch (e) {
+        console.error('Failed to load models:', e);
+        setAvailableModels([selectedModel]); // Fallback to default
+      }
+    };
+
+    loadModels();
+  }, []);
+
+  const handleGenerateCourse = useCallback(async (newTopic: string, generateImages: boolean, newDifficulty: Difficulty, newFormat: CourseFormat, model: ModelInfo) => {
     if (!newTopic.trim()) {
       setError('Please enter a topic.');
       return;
     }
-    
+
     setTopic(newTopic);
     setIncludeImages(generateImages);
     setDifficulty(newDifficulty);
     setCourseFormat(newFormat);
+    setSelectedModel(model);
     setIsGenerating(true);
     setCourse(null);
     setError(null);
@@ -67,7 +118,16 @@ const App: React.FC = () => {
         const log: LogEntry[] = [];
         let currentLogIndex = -1;
 
-        for await (const update of generateCourseStream(newTopic, generateImages, newDifficulty, newFormat)) {
+        // Create AI service based on selected model provider
+        const aiService = await createAIService(model.provider);
+        const modelConfig: ModelConfig = {
+          provider: model.provider,
+          model: model.id,
+          supportsImages: model.supportsImages || false,
+          supportsSearch: model.provider === ModelProvider.Gemini, // Only Gemini supports search
+        };
+
+        for await (const update of aiService.generateCourseStream(newTopic, generateImages, newDifficulty, newFormat, modelConfig)) {
             if (update.step === "OUTLINING") {
                 if (update.payload) { // Outline is done
                     log[currentLogIndex].isCompleted = true;
@@ -176,15 +236,18 @@ const App: React.FC = () => {
             Turn any topic into a comprehensive, ready-to-use course in minutes.
           </p>
         </div>
-        <TopicInput 
-          onSubmit={handleGenerateCourse} 
-          disabled={isGenerating} 
+        <TopicInput
+          onSubmit={handleGenerateCourse}
+          disabled={isGenerating}
           includeImages={includeImages}
           setIncludeImages={setIncludeImages}
           difficulty={difficulty}
           setDifficulty={setDifficulty}
           courseFormat={courseFormat}
           setCourseFormat={setCourseFormat}
+          availableModels={availableModels}
+          selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
           onLoadCourse={handleLoadCourse}
           savedCourseExists={savedCourseExists}
         />
