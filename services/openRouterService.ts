@@ -10,6 +10,7 @@ export class OpenRouterService implements AIService {
     this.client = new OpenAI({
       baseURL: 'https://openrouter.ai/api/v1',
       apiKey: process.env.OPENROUTER_API_KEY,
+      dangerouslyAllowBrowser: true, // Required for client-side usage
       defaultHeaders: {
         'HTTP-Referer': window.location.origin,
         'X-Title': 'Course Genius',
