@@ -1,4 +1,5 @@
-import type { CourseOutline, Module, Difficulty, CourseFormat, GenerationUpdate, ModelConfig, ModelInfo, ModelProvider } from '../types';
+import type { CourseOutline, Module, Difficulty, CourseFormat, GenerationUpdate, ModelConfig, ModelInfo } from '../types';
+import { ModelProvider } from '../types';
 
 // Unified interface that both Gemini and OpenRouter services will implement
 export interface AIService {
@@ -32,22 +33,24 @@ export async function createAIService(provider: string): Promise<AIService> {
   }
 }
 
-// Default models configuration
-export const DEFAULT_MODELS: ModelInfo[] = [
-  {
-    id: 'gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
-    provider: ModelProvider.Gemini,
-    contextLength: 128000,
-    supportsImages: true,
-    supportsStreaming: true,
-  },
-  {
-    id: 'gemini-2.5-flash-image-preview',
-    name: 'Gemini 2.5 Flash (Image Generation)',
-    provider: ModelProvider.Gemini,
-    contextLength: 128000,
-    supportsImages: true,
-    supportsStreaming: true,
-  }
-];
+// Default models configuration - function to avoid module loading issues
+export function getDefaultModels(): ModelInfo[] {
+  return [
+    {
+      id: 'gemini-2.5-flash',
+      name: 'Gemini 2.5 Flash',
+      provider: ModelProvider.Gemini,
+      contextLength: 128000,
+      supportsImages: true,
+      supportsStreaming: true,
+    },
+    {
+      id: 'gemini-2.5-flash-image-preview',
+      name: 'Gemini 2.5 Flash (Image Generation)',
+      provider: ModelProvider.Gemini,
+      contextLength: 128000,
+      supportsImages: true,
+      supportsStreaming: true,
+    }
+  ];
+}
