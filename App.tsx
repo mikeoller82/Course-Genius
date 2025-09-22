@@ -266,7 +266,7 @@ const App: React.FC = () => {
         {renderContent()}
       </main>
       <footer className="w-full text-center p-4 text-slate-500 text-sm mt-8">
-        Powered by Google Gemini
+        Powered by Artificial Intelligence.
       </footer>
     </div>
   );

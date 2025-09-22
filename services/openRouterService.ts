@@ -89,70 +89,84 @@ export class OpenRouterService implements AIService {
       const response = await fetch('https://openrouter.ai/api/v1/models');
       const data = await response.json();
 
-      // Filter and map models suitable for course generation
+      // Filter and map models - ONLY FREE MODELS
       return data.data
-        .filter((model: any) =>
-          model.context_length >= 32000 && // Need good context for course generation
-          !model.id.includes('vision') && // Skip vision-only models for now
-          !model.id.includes('whisper') && // Skip audio models
-          !model.id.includes('embedding') // Skip embedding models
-        )
-        .slice(0, 25) // Increased to 25 models for better selection
+        .filter((model: any) => {
+          // Check if model is free by looking at pricing or model ID
+          const isFree = model.id.includes(':free') || 
+                        (model.pricing && 
+                         parseFloat(model.pricing.prompt) === 0 && 
+                         parseFloat(model.pricing.completion) === 0);
+          
+          return (
+            isFree &&
+            model.context_length >= 100000 && // Need good context for course generation
+            !model.id.includes('vision') && // Skip vision-only models for now
+            !model.id.includes('whisper') && // Skip audio models
+            !model.id.includes('embedding') // Skip embedding models
+          );
+        })
+        .slice(0, 200) // Limit to 50 free models for better performance
         .map((model: any) => {
           const maxOutputTokens = this.getMaxOutputTokens(model.id, model.context_length);
           return {
             id: model.id,
-            name: model.name || model.id,
+            name: `${model.name || model.id} (${maxOutputTokens.toLocaleString()} tokens)`, // Show max tokens in name
             provider: ModelProvider.OpenRouter,
             contextLength: model.context_length,
             maxOutputTokens: maxOutputTokens,
             supportsImages: false, // Most OpenRouter models don't generate images
             supportsStreaming: true,
-            cost: model.pricing ? {
-              input: parseFloat(model.pricing.prompt) * 1000000, // Convert to per million tokens
-              output: parseFloat(model.pricing.completion) * 1000000,
-            } : undefined,
+            cost: {
+              input: 0, // Free models
+              output: 0,
+            },
           };
-        });
+        })
+        .sort((a, b) => b.maxOutputTokens - a.maxOutputTokens); // Sort by max output tokens descending
     } catch (error) {
       console.error('Failed to fetch OpenRouter models:', error);
-      // Return some popular models as fallback with proper max output tokens
+      // Return some popular free models as fallback with proper max output tokens
       return [
         {
-          id: 'anthropic/claude-3.5-sonnet',
-          name: 'Claude 3.5 Sonnet',
-          provider: ModelProvider.OpenRouter,
-          contextLength: 200000,
-          maxOutputTokens: 8192,
-          supportsImages: false,
-          supportsStreaming: true,
-        },
-        {
-          id: 'openai/gpt-4o',
-          name: 'GPT-4o',
-          provider: ModelProvider.OpenRouter,
-          contextLength: 128000,
-          maxOutputTokens: 16384,
-          supportsImages: false,
-          supportsStreaming: true,
-        },
-        {
-          id: 'google/gemini-pro-2.5',
-          name: 'Gemini Pro 1.5',
-          provider: ModelProvider.OpenRouter,
-          contextLength: 1000000,
-          maxOutputTokens: 32768,
-          supportsImages: false,
-          supportsStreaming: true,
-        },
-        {
-          id: 'meta-llama/llama-3.1-405b',
-          name: 'Llama 3.1 405B',
+          id: 'qwen/qwen3-coder:free',
+          name: 'Qwen3 Coder Free (262,000 tokens)',
           provider: ModelProvider.OpenRouter,
           contextLength: 131072,
-          maxOutputTokens: 32768,
+          maxOutputTokens: 262000,
           supportsImages: false,
           supportsStreaming: true,
+          cost: { input: 0, output: 0 },
+        },
+        {
+          id: 'deepseek/deepseek-chat-v3.1:free',
+          name: 'DeepSeek v3.1 Free (163,000 tokens)',
+          provider: ModelProvider.OpenRouter,
+          contextLength: 131072,
+          maxOutputTokens: 163000,
+          supportsImages: false,
+          supportsStreaming: true,
+          cost: { input: 0, output: 0 },
+        },
+        {
+          id: 'qwen/qwen3-235b-a22b:free',
+          name: 'Qwen3 235B Free (131,000 tokens)',
+          provider: ModelProvider.OpenRouter,
+          contextLength: 131072,
+          maxOutputTokens: 131000,
+          supportsImages: false,
+          supportsStreaming: true,
+          cost: { input: 0, output: 0 },
+        },
+        {
+          id: 'nvidia/nemotron-nano-9b-v2:free',
+          name: 'Nvidia Nemotron Nano Free (128,000 tokens)',
+          provider: ModelProvider.OpenRouter,
+          contextLength: 128000,
+          maxOutputTokens: 128000,
+          supportsImages: false,
+          supportsStreaming: true,
+          cost: { input: 0, output: 0 },
         },
       ];
     }
@@ -427,18 +441,18 @@ The JSON object should include:
 2. 'description': A brief description of what this module covers
 3. 'lessons': An array of lesson objects. Each lesson must have:
    - 'title': The lesson title
-   - 'content': The detailed lesson content in Markdown format (minimum 500 words)
-   - 'videoScript': (Optional but encouraged) A short, engaging video script for the lesson that could be used for video creation. Should be conversational and educational.
-   - 'imagePrompt': (Optional) A simple, descriptive prompt for an AI image generator to create a relevant visual for the lesson. Focus on clear, concrete subjects and actions.
-4. 'quiz': (Optional but encouraged) A quiz object with a title and an array of multiple-choice questions to test understanding of the module. Each question needs:
+   - 'content': The detailed lesson content in Markdown format (minimum 750 words)
+   - 'videoScript':  A long form detailed, engaging video script for the lesson that could be used for video creation. Should be conversational and educational.
+   - 'imagePrompt':  A simple, descriptive prompt for an AI image generator to create a relevant visual for the lesson. Focus on clear, concrete subjects and actions.
+4. 'quiz':  A quiz object with a title and an array of multiple-choice questions to test understanding of the module. Each question needs:
    - 'questionText': The question text
    - 'options': Array of possible answers
    - 'correctAnswer': The correct answer (must match one of the options exactly)
    - 'explanation': An explanation of why this is the correct answer
-5. 'worksheet': (Optional but encouraged) A worksheet object with a title and content (in Markdown) that includes practical exercises, assignments, or hands-on activities for the learner to apply what they've learned.
-6. 'resourceSheet': (Optional but encouraged) A resource sheet object with a title and content (in Markdown) listing further reading, useful links, tools, or additional materials related to the module.
+5. 'worksheet': A worksheet object with a title and content (in Markdown) that includes practical exercises, assignments, or hands-on activities for the learner to apply what they've learned.
+6. 'resourceSheet': A resource sheet object with a title and content (in Markdown) listing further reading, useful links, tools, or additional materials related to the module.
 
-Ensure all text content, especially lesson content, worksheets, and resource sheets, is formatted using Markdown for clear presentation. Video scripts should be engaging and suitable for educational content creation.`;
+Ensure all text content, especially lesson content, worksheets, and resource sheets, is formatted using Markdown for clear presentation. Video scripts should be engaging and suitable for educational content creation in a detailed storyvboard format.`;
 
       let module: Module;
       try {
